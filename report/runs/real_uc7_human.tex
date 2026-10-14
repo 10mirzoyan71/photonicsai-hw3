@@ -1,0 +1,58 @@
+\subsection*{Use case 5 (real camera): human stops, first attempt}
+\textbf{Request:} \emph{Set the gain to 12 dB and choose the exposure so that the wall is at about half of the camera's range, then report the exposure and the temporal noise.}\\
+Camera: Hikrobot MV-CS028-10UM (real hardware); 3 orchestrator decisions, 10 hardware decisions, 11 MCP tool calls.
+\\{\small\textbf{Tool calls and what the instrument did:} (1)~\texttt{camera\_info} $\to$ MV-CS028-10UM, 1936x1464, 12-bit; exposure 6000.0 us, gain 0.0 dB; (2)~\texttt{set\_gain} gain\_db=12.0 $\to$ gain set to 11.991 dB; (3)~\texttt{capture} n\_frames=2, label=gain12\_trial $\to$ 2 frame(s) at 6000 us, 11.991 dB: mean 3776.93, max 4009 DN, 0 satu...; (4)~\texttt{analyze\_frame} frame\_file=cap001\_gain12\_trial.npy, b... $\to$ speckle contrast 0.014, grain 1.018 x 1.055 px; beam centroid (127....; (5)~\texttt{set\_exposure} exposure\_us=3250.0 $\to$ exposure set to 3250 us; (6)~\texttt{capture} n\_frames=2, label=gain12\_exp3250 $\to$ 2 frame(s) at 3250 us, 11.991 dB: mean 2076.49, max 2238 DN, 0 satu...; (7)~\texttt{capture} n\_frames=16, label=wall\_gain12\_exp3250 $\to$ 16 frame(s) at 3250 us, 11.991 dB: mean 2075.86, max 2241 DN, 0 sat...; (8)~\texttt{analyze\_frame} frame\_file=cap003\_wall\_gain12\_exp3250... $\to$ speckle contrast 0.0183, grain 1.016 x 1.036 px; beam centroid (127...; (9)~\texttt{capture} n\_frames=16, label=dark\_gain12\_exp3250 $\to$ 16 frame(s) at 3250 us, 11.991 dB: mean 2054.24, max 2207 DN, 0 sat...; (10)~\texttt{capture} n\_frames=16, label=dark\_gain12\_exp325... $\to$ 16 frame(s) at 3250 us, 11.991 dB: mean 2024.53, max 2192 DN, 0 sat...; (11)~\texttt{capture} n\_frames=16, label=dark\_gain12\_exp325... $\to$ 16 frame(s) at 3250 us, 11.991 dB: mean 1996.24, max 2163 DN, 0 sat....}
+\\\textbf{Verified result:} 3250 us, 11.991 dB: max 2163 DN, 0 saturated px.
+\par\smallskip\textbf{Sequence diagram} (as above; long hardware turns shortened).
+\begin{center}\begin{tikzpicture}[x=1cm,y=-0.208cm,font=\scriptsize,>=Stealth]
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (0.00,-1.4) {User};
+\draw[gray!60,dashed] (0.00,-0.4) -- (0.00,36.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (2.30,-1.4) {Orchestrator};
+\draw[gray!60,dashed] (2.30,-0.4) -- (2.30,36.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (4.60,-1.4) {Scientist};
+\draw[gray!60,dashed] (4.60,-0.4) -- (4.60,36.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (6.90,-1.4) {Executor};
+\draw[gray!60,dashed] (6.90,-0.4) -- (6.90,36.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (9.20,-1.4) {Human};
+\draw[gray!60,dashed] (9.20,-0.4) -- (9.20,36.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (11.50,-1.4) {MCP server};
+\draw[gray!60,dashed] (11.50,-0.4) -- (11.50,36.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (13.80,-1.4) {Camera};
+\draw[gray!60,dashed] (13.80,-0.4) -- (13.80,36.5);
+\draw[->] (0.00,0.5) -- node[above,inner sep=0.5pt,font=\tiny] {request} (2.30,0.5);
+\draw[->] (2.30,1.5) -- node[above,inner sep=0.5pt,font=\tiny] {1: scientist} (4.60,1.5);
+\draw[->,dashed] (4.60,2.5) -- node[above,inner sep=0.5pt,font=\tiny] {plan} (2.30,2.5);
+\draw[->] (2.30,3.5) -- node[above,inner sep=0.5pt,font=\tiny] {2: question} (9.20,3.5);
+\draw[->,dashed] (9.20,4.5) -- node[above,inner sep=0.5pt,font=\tiny] {reply (accepted)} (2.30,4.5);
+\draw[->] (6.90,5.5) -- node[above,inner sep=0.5pt,font=\tiny] {camera\_info} (11.50,5.5);
+\draw[->] (11.50,6.5) -- node[above,inner sep=0.5pt,font=\tiny] {read features} (13.80,6.5);
+\draw[->,dashed] (13.80,7.5) -- node[above,inner sep=0.5pt,font=\tiny] {features} (6.90,7.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,8.5) {decide: set\_gain};
+\draw[->] (6.90,9.5) -- node[above,inner sep=0.5pt,font=\tiny] {set\_gain(gain\_db=12)} (11.50,9.5);
+\draw[->] (11.50,10.5) -- node[above,inner sep=0.5pt,font=\tiny] {Gain} (13.80,10.5);
+\draw[->,dashed] (13.80,11.5) -- node[above,inner sep=0.5pt,font=\tiny] {applied} (6.90,11.5);
+\draw[->] (6.90,12.5) -- node[above,inner sep=0.5pt,font=\tiny] {capture} (11.50,12.5);
+\draw[->] (11.50,13.5) -- node[above,inner sep=0.5pt,font=\tiny] {trigger + grab} (13.80,13.5);
+\draw[->,dashed] (13.80,14.5) -- node[above,inner sep=0.5pt,font=\tiny] {frame stats} (6.90,14.5);
+\draw[->] (6.90,15.5) -- node[above,inner sep=0.5pt,font=\tiny] {analyze\_frame} (11.50,15.5);
+\draw[->,dashed] (11.50,16.5) -- node[above,inner sep=0.5pt,font=\tiny] {result} (6.90,16.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,17.5) {decide: set\_exposure};
+\draw[->] (6.90,18.5) -- node[above,inner sep=0.5pt,font=\tiny] {set\_exposure(exposure\_us=3250)} (11.50,18.5);
+\draw[->] (11.50,19.5) -- node[above,inner sep=0.5pt,font=\tiny] {ExposureTime} (13.80,19.5);
+\draw[->,dashed] (13.80,20.5) -- node[above,inner sep=0.5pt,font=\tiny] {applied} (6.90,20.5);
+\draw[->] (6.90,21.5) -- node[above,inner sep=0.5pt,font=\tiny] {capture} (11.50,21.5);
+\draw[->] (11.50,22.5) -- node[above,inner sep=0.5pt,font=\tiny] {trigger + grab} (13.80,22.5);
+\draw[->,dashed] (13.80,23.5) -- node[above,inner sep=0.5pt,font=\tiny] {frame stats} (6.90,23.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,24.5) {decide: measure};
+\draw[->] (6.90,25.5) -- node[above,inner sep=0.5pt,font=\tiny] {capture} (11.50,25.5);
+\draw[->] (11.50,26.5) -- node[above,inner sep=0.5pt,font=\tiny] {trigger + grab} (13.80,26.5);
+\draw[->,dashed] (13.80,27.5) -- node[above,inner sep=0.5pt,font=\tiny] {frame stats} (6.90,27.5);
+\draw[->] (6.90,28.5) -- node[above,inner sep=0.5pt,font=\tiny] {analyze\_frame} (11.50,28.5);
+\draw[->,dashed] (11.50,29.5) -- node[above,inner sep=0.5pt,font=\tiny] {result} (6.90,29.5);
+\node[draw,dotted,fill=gray!8,font=\tiny,minimum width=7.30cm] at (10.35,30.5) {... 6 more steps of the same kind (decide, command, measure): see the table ...};
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,31.5) {decide: finish};
+\draw[->,dashed] (6.90,32.5) -- node[above,inner sep=0.5pt,font=\tiny] {hardware report} (2.30,32.5);
+\draw[->] (2.30,33.5) -- node[above,inner sep=0.5pt,font=\tiny] {3: question} (9.20,33.5);
+\draw[->,dashed] (9.20,34.5) -- node[above,inner sep=0.5pt,font=\tiny] {reply (accepted)} (2.30,34.5);
+\draw[->] (2.30,35.5) -- node[above,inner sep=0.5pt,font=\tiny] {final report} (0.00,35.5);
+\end{tikzpicture}\end{center}

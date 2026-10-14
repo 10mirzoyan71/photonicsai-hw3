@@ -1,0 +1,14 @@
+{
+ "thread": "uc3_speckle",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "sim",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "Measure the speckle contrast and the speckle grain size in the centre of the beam, with an exposure that does not saturate."
+}

@@ -1,0 +1,171 @@
+USER: Measure the speckle contrast and the speckle grain size in the centre of the beam, with an exposure that does not saturate.
+
+================== ORCHESTRATOR ==================
+Decision 1/10 -> scientist
+Instruction: Write a short numbered plan to measure speckle contrast (std/mean in a centre-of-beam ROI) and speckle grain size (autocorrelation width of the ROI) with a non-saturating exposure. Include: how to choose the exposure (peak pixel below ~80% of full scale, check no saturated pixels, dark frame/black level subtraction), ROI size, number of frames, the formulas for contrast and grain size (FWHM of the autocorrelation, in pixels and in µm using the pixel pitch), and the checks needed (e.g. contrast should be ≤1 for fully developed speckle, grain must be sampled by more than 2 pixels).
+Reason: A plan with settings and formulas is needed before commanding the camera.
+
+================== SCIENTIST ==================
+# Plan: speckle contrast and grain size at the beam centre
+
+## Quantities
+- **Speckle contrast** C = σ_I / ⟨I⟩, taken over a ROI at the beam centre on dark-subtracted frames, where I is in DN.
+  - Fully developed polarized speckle has C → 1, and C ≤ 1 is expected.
+  - Noise correction: var_total = var_speckle + ⟨I⟩/K + var_dark, with K in e⁻/DN.
+  - C_corr² = (var_total − var_dark − ⟨I⟩/K) / ⟨I⟩².
+  - K is not yet known. Report the raw C, and apply the correction only if K comes from a separate photon-transfer measurement or the camera specification.
+- **Grain size**: the FWHM of the normalized autocorrelation of the intensity fluctuation.
+  - δI = I − ⟨I⟩, and ρ(Δx, Δy) = ⟨δI(x,y) δI(x+Δx, y+Δy)⟩ / σ².
+  - FWHM is the lag width where ρ = 0.5, in pixels, found along x and y separately and as a radial average.
+  - Grain in µm = FWHM_px × pixel pitch. Read the pitch from the camera or its datasheet; do not assume it.
+  - Shot and read noise are white, so they add a spike only at zero lag. Handle this by fitting a Gaussian to lags ≥ 1 and extrapolating to lag 0. Take σ² from the fit amplitude, then compute the FWHM from the fit.
+
+## Exposure logic
+- Speckle intensity is roughly exponentially distributed, so the brightest pixel in a ROI of N pixels is about ⟨I⟩·ln N, or ~10–11× the mean for N ≈ 65k.
+- The requirement that the peak stays below ~80% of full scale therefore sets a low mean, about 7–10% of full scale.
+- Use the highest bit depth available (Mono12 or Mono10 if offered) so this mean is still well above the quantization step.
+- Full scale = 2^bits − 1. Exposure update: t_new = t_old × 0.75·FS / (max_DN − dark_mean).
+
+## Camera settings
+- Auto exposure, auto gain and auto black level off.
+- Gain at its minimum (0 dB). Gamma and any LUT off or linear.
+- Trigger off, fixed frame rate, full-frame readout.
+- Exposure within the camera's reported range, and no change to the laser power. If the beam is too bright at the minimum exposure, add an ND filter rather than exceeding limits.
+- Keep the same settings for dark and signal frames.
+
+## Numbered steps
+1. [hardware] Query and record the pixel format, bit depth, pixel pitch, sensor size, exposure range and gain range. Apply the settings above.
+2. [hardware] Take one full-frame test capture at a short exposure. Then run a short exposure sweep of about 5 values, 1 frame each. Keep the largest exposure whose full-frame max stays below ~80% FS. Save the frames.
+3. [analysis] For the sweep, print the max DN, th
+
+================== ORCHESTRATOR ==================
+Decision 2/10 -> hardware
+Instruction: Execute plan steps 1, 2 and 4 on the camera. Step 1: query and report pixel format, bit depth (use the highest, Mono12 or Mono10 if offered), pixel pitch, sensor size, exposure range and gain range. Set auto exposure, auto gain and auto black level off, gain at minimum, gamma and LUT off or linear, trigger off, full frame. Step 2: take one test capture at a short exposure, then a sweep of about 5 exposures, 1 frame each. For each, report the full-frame max DN, the number of saturated pixels, and the centre mean. Save the frames and give their file paths. Choose the largest exposure whose max stays below ~80% of full scale. Step 4: at that exposure, capture 20 signal frames. Then block the laser or cap the camera and capture 20 dark frames at the same exposure and gain. Save all frames and report the paths, the settings actually applied, and the measured values. Do not change the laser power.
+Reason: No data exists yet, so the camera must be configured and frames captured before analysis.
+
+================== INSTRUMENT [start] ==================
+camera_info -> {"vendor": "simulation", "model": "SimCam-640 (simulated 12-bit CMOS)", "sensor_width": 640, "sensor_height": 512, "bit_depth": 12, "max_dn": 4095, "exposure_range_us": [20.0, 2000000.0], "gain_range_db": [0.0, 24.0], "exposure_us": 1000.0, "gain_db": 0.0, "roi": {"x": 0, "y": 0, "width": 640, "height": 512}, "illumination_control": true, "lab_limits": {"max_exposure_us": 500000, "max_gain_db": 24, "max_frames": 16}}
+
+================== EXECUTOR [decide] ==================
+Hardware step 1: set_exposure {"exposure_us": 100}, then capture 1 frame(s)
+Reason: Gain is already 0 dB; set a short test exposure and capture one frame.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 100} -> ok {"exposure_us": 100.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 100 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 58.24 DN, std 50.87, max 1417, p99.9 563.3 (0.1376 of full scale), saturated 0 px (0.0); regions {"centre": {"mean_dn": 172.18, "std_dn": 131.5, "max_dn": 1417, "pixels": 16384}}; file camera/cap001_test_100us.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 2: set_exposure {"exposure_us": 200}, then capture 1 frame(s)
+Reason: Max was 1417 DN at 100 us (0.35 FS); try 200 us in the sweep (expected max ~2800).
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 200} -> ok {"exposure_us": 200.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 200 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 77.52 DN, std 104.54, max 2918, p99.9 1115.3 (0.2724 of full scale), saturated 0 px (0.0); regions {"centre": {"mean_dn": 284.72, "std_dn": 254.22, "max_dn": 2918, "pixels": 16384}}; file camera/cap002_sweep_200us.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 3: set_exposure {"exposure_us": 225}, then capture 1 frame(s)
+Reason: Max scales ~14.6 DN/us, so 225 us should give a max near 3280 DN (80% FS); check it.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 225} -> ok {"exposure_us": 225.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 225 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 81.71 DN, std 116.26, max 3187, p99.9 1240.6 (0.303 of full scale), saturated 0 px (0.0); file camera/cap003_sweep_225us.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 4: capture 16 frame(s) with the current settings
+Reason: 225 us gives max 3187 DN (0.78 FS, 0 saturated), so keep it; capture signal frames (lab limit is 16 frames per capture, so 16 instead of 20).
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 225 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 81.92 DN, std 116.79, max 3134, p99.9 1250.0 (0.3053 of full scale), saturated 0 px (0.0); regions {"centre": {"mean_dn": 297.27, "std_dn": 276.64, "max_dn": 3134, "pixels": 16384}}; temporal noise 5.0217 DN rms (var 25.2173, mean 81.44); file camera/cap004_signal_225us.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 5: set_illumination {"level": 0}, then capture 16 frame(s)
+Reason: Signal frames are done; set illumination to 0 for the dark frames at the same exposure and gain, then capture. The capture runs after the command.
+
+================== INSTRUMENT [command] ==================
+set_illumination {"level": 0} -> ok {"illumination": 0.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 225 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.01 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5188 DN rms (var 6.3444, mean 40.004); file camera/cap005_dark_225us.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 6: finish: Camera: SimCam-640 (simulated), 640x512, 12-bit (max 4095 DN), exposure range 20 to 2,000,000 us, gain range 0 to 24 dB. The lab limit is 16 frames per capture, so I took 16 frames instead of 20. Pixel pitch was not returned by camera_info. Auto exposure, auto gain, gamma, LUT and trigger settings are not exposed by the tools, so I could not set or verify them. Gain stayed at 0 dB and the ROI was the full frame. Sweep, 1 frame each: 100 us: max 1417, 0 saturated, centre mean 172.18 (cap001_test_100us.npy). 200 us: max 2918, 0 saturated, centre mean 284.72 (cap002_sweep_200us.npy). 225 us: max 3187 (0.78 FS), 0 saturated (cap003_sweep_225us.npy). The 225 us frame had no centre region, so no centre mean was returned. Chosen exposure: 225 us, the largest tried with max below about 80% FS. Signal, 16 frames at 225 us, 0 dB, illumination 1: frame mean 81.92 DN, max 3134, 0 saturated, centre mean 297.27 DN with std 276.64 (centre std/mean about 0.93, raw and uncorrected). Temporal noise is 5.02 DN rms. File: camera/cap004_signal_225us.npy. Dark, 16 frames at 225 us, 0 dB, illumination 0: mean 40.01 DN (black level), std 2.52, max 51, temporal noise 2.52 DN rms (var 6.34). File: camera/cap005_dark_225us.npy. Illumination is currently 0 and needs restoring to 1 if more signal frames are needed. Laser power was not changed. Next: analysis with dark subtraction (black level about 40 DN), a centre ROI, contrast and autocorrelation grain size.
+Reason: Signal and dark frames are captured at the same exposure and gain; the hardware part of the plan is done.
+
+================== EXECUTOR [report] ==================
+Hardware turn report: Camera: SimCam-640 (simulated), 640x512, 12-bit (max 4095 DN), exposure range 20 to 2,000,000 us, gain range 0 to 24 dB. The lab limit is 16 frames per capture, so I took 16 frames instead of 20. Pixel pitch was not returned by camera_info. Auto exposure, auto gain, gamma, LUT and trigger settings are not exposed by the tools, so I could not set or verify them. Gain stayed at 0 dB and the ROI was the full frame. Sweep, 1 frame each: 100 us: max 1417, 0 saturated, centre mean 172.18 (cap001_test_100us.npy). 200 us: max 2918, 0 saturated, centre mean 284.72 (cap002_sweep_200us.npy). 225 us: max 3187 (0.78 FS), 0 saturated (cap003_sweep_225us.npy). The 225 us frame had no centre region, so no centre mean was returned. Chosen exposure: 225 us, the largest tried with max below about 80% FS. Signal, 16 frames at 225 us, 0 dB, illumination 1: frame mean 81.92 DN, max 3134, 0 saturated, centre mean 297.27 DN with std 276.64 (centre std/mean about 0.93, raw and uncorrected). Temporal noise is 5.02 DN rms. File: camera/cap004_signal_225us.npy. Dark, 16 frames at 225 us, 0 dB, illumination 0: mean 40.01 DN (black level), std 2.52, max 51, temporal noise 2.52 DN rms (var 6.34). File: camera/cap005_dark_225us.npy. Illumination is currently 0 and needs restoring to 1 if more signal frames are needed. Laser power was not changed. Next: analysis with dark subtraction (black level about 40 DN), a centre ROI, contrast and autocorrelation grain size.
+
+[instrument record]
+commands: 4 (4 applied), captures: 5
+  set_exposure {"exposure_us": 100} -> ok
+  capture 1 frame(s) at 100 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 58.24 DN, std 50.87, max 1417, p99.9 563.3 (0.1376 of full scale), saturated 0 px (0.0); regions {"centre": {"mean_dn": 172.18, "std_dn": 131.5, "max_dn": 1417, "pixels": 16384}}; file camera/cap001_test_100us.npy
+  set_exposure {"exposure_us": 200} -> ok
+  capture 1 frame(s) at 200 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 77.52 DN, std 104.54, max 2918, p99.9 1115.3 (0.2724 of full scale), saturated 0 px (0.0); regions {"centre": {"mean_dn": 284.72, "std_dn": 254.22, "max_dn": 2918, "pixels": 16384}}; file camera/cap002_sweep_200us.npy
+  set_exposure {"exposure_us": 225} -> ok
+  capture 1 frame(s) at 225 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 81.71 DN, std 116.26, max 3187, p99.9 1240.6 (0.303 of full scale), saturated 0 px (0.0); file camera/cap003_sweep_225us.npy
+  capture 16 frame(s) at 225 us, 0 dB, illumination 1
+
+================== ORCHESTRATOR ==================
+Decision 3/10 -> executor
+Instruction: Write and run ONE Python script (run with python -I) on the saved frames in camera/: signal camera/cap004_signal_225us.npy (16 frames) and dark camera/cap005_dark_225us.npy (16 frames). Steps: (1) dark mean frame = mean over dark frames; dark variance = temporal variance per pixel (~6.34 DN^2). Subtract the dark mean from the signal frames. (2) Print MAX_DN (raw signal max), NSAT (pixels >= 4095), MAX_FRAC = max/4095. (3) Find the beam centroid from the mean dark-subtracted frame; define a square ROI centred on it, about 128x128 px (the centre region the camera reported was 128x128), clipped to the sensor. Print ROI_X0, ROI_Y0, ROI_N, SAT_IN_ROI. Report the envelope variation edge-to-centre; if it is >10%, divide each frame by a heavily smoothed Gaussian of the mean frame before computing C and the autocorrelation, and say so. (4) Contrast per frame = std/mean over the ROI. Print CONTRAST_MEAN and CONTRAST_STD over the 16 frames. Also print CONTRAST_CORR with the noise correction, using var_dark = 6.34 DN^2 and the shot-noise term only if K is known. K is unknown, so estimate K from the photon-transfer slope of temporal variance versus mean in the signal frames (pixel-wise temporal var minus dark var, against mean) and print K_EST. Otherwise state that the correction is not applied. (5) Grain size: per-frame ROI autocorrelation of the mean-subtracted fluctuation (FFT, zero-padded, normalized by overlap counts), averaged over frames. Fit a Gaussian to lags >= 1 and extrapolate to lag 0. Print GRAIN_FWHM_X_PX, GRAIN_FWHM_Y_PX, GRAIN_FWHM_RADIAL_PX, GRAIN_STD_PX (scatter across frames). Print the pixel pitch as unknown, since camera_info did not return it, and do not invent GRAIN_UM. (6) Print PASS/FAIL lines: no saturation (NSAT=0 and MAX_FRAC<0.8), C<=~1, grain FWHM>2 px, x/y ratio near 1.
+Reason: Frames are captured; the dark-subtracted contrast and autocorrelation analysis needs the coding tool.
+
+================== EXECUTOR ==================
+The script ran with exit code 0. These are its printed values.
+
+**Exposure and saturation**
+- MAX_DN=3244
+- NSAT=0
+- MAX_FRAC=0.7922
+- SAT_IN_ROI=0
+- DARK_MEAN=40.004
+- DARK_VAR=6.3383
+
+**ROI**
+- The centroid is at CENTROID_X=318.6, CENTROID_Y=256.0.
+- ROI_X0=255, ROI_Y0=192, ROI_N=128.
+- ENVELOPE_VAR=0.434. This is above 10%, so ENVELOPE_FLATTENED=yes. Each frame was divided by a smoothed version of the mean frame before computing contrast and autocorrelation.
+
+**Contrast**
+- CONTRAST_MEAN=0.9648
+- CONTRAST_STD=0.0003
+- PTC_SLOPE=0.4966, which gives K_EST=2.0138.
+- CONTRAST_CORR=0.9639, after the noise correction using that K estimate.
+
+**Grain size**
+- GRAIN_FWHM_X_PX=2.896
+- GRAIN_FWHM_Y_PX=2.736
+- GRAIN_FWHM_RADIAL_PX=2.706
+- GRAIN_STD_PX=0.001
+- ACF_LAG0..4_X=[1, 0.75, 0.287, 0.034, 0.02]
+- PIXEL_PITCH=unknown, because camera_info did not return it. No grain size in µm was computed.
+
+**Checks**
+- PASS_NO_SAT=True
+- PASS_C_LE_1=True
+- PASS_GRAIN_GT_2PX=True
+- PASS_XY_RATIO=True (ratio=1.059)
+
+**Caveats**
+- The frame-to-frame scatter of contrast (0.0003) and grain size (0.001) is extremely small. The 16 frames probably share the same speckle pattern, differing only by noise. If so, the scatter reflects noise only and says nothing about how the speckle varies between independent realizations.
+- The grain is only modestly sampled: 2.7 to 2.9 px is above the 2 px limit but below the 3 px ideal. The contrast may therefore be slightly biased low.
+- The script printed RuntimeWarnings (divide by zero and invalid value) in the autocorrelation normalization, at lags with zero overlap count. The fitted lags appear unaffected, but I did not verify this.
+- The envelope flattening and the PTC-based K are my own choices, so treat CONTRAST_CORR as approximate.
+
+[tool record]
+write analysis.py: ok
+run analysis.py: exit code 0, 1.0 s
+VERIFIED printed by the script: {'MAX_DN': 3244.0, 'NSAT': 0.0, 'MAX_FRAC': 0.7922, 'DARK_MEAN': 40.004, 'DARK_VAR': 6.3383, 'ROI_X0': 255.0, 'ROI_Y0': 192.0, 'ROI_N': 128.0, 'SAT_IN_ROI': 0.0, 'ENVELOPE_VAR': 0.434, 'CONTRAST_MEAN': 0.9648, 'CONTRAST_STD': 0.0003, 'PTC_SLOPE': 0.4966, 'K_EST': 2.0138, 'CONTRAST_CORR': 0.9639, 'GRAIN_FWHM_X_PX': 2.896, 'GRAIN_FWHM_Y_PX': 2.736, 'GRAIN_FWHM_RADIAL_PX': 2.706, 'GRAIN_STD_PX': 0.001}
+
+================== ORCHESTRATOR ==================
+Decision 4/10 -> finish
+Instruction: Final report (SimCam-640, simulated 12-bit, 640x512). Exposure: 225 us, gain 0 dB, laser power unchanged. Full-frame max 3244 DN in the signal frames (MAX_FRAC=0.7922), NSAT=0 and SAT_IN_ROI=0, so the exposure does not saturate. Dark mean (black level) 40.004 DN, dark variance 6.3383 DN^2. 16 signal and 16 dark frames were used, not 20, because the lab limit is 16 frames per capture. Centre ROI: 128x128 px at X0=255, Y0=192. The envelope variation was 0.434, which is above 10%. Each frame was therefore divided by a smoothed version of the mean frame before the contrast and autocorrelation were computed. Speckle contrast: CONTRAST_MEAN=0.9648 (std over frames 0.0003). The noise-corrected value is CONTRAST_CORR=0.9639, using K_EST=2.0138 e-/DN from the photon-transfer slope (PTC_SLOPE=0.4966). That K is an estimate, so the corrected value is approximate. Speckle grain size (FWHM of the autocorrelation): 2.896 px in x, 2.736 px in y, 2.706 px radial (x/y ratio 1.059). The frame-to-frame scatter is 0.001 px. The pixel pitch was not reported by camera_info, so the grain size in um is not given. Checks: no saturation PASS, C<=1 PASS, grain>2 px PASS, x/y ratio PASS. Caveats: (1) The grain is only modestly sampled (2.7-2.9 px, below the ideal 3 px), so the contrast may be slightly biased low. (2) The very small frame-to-frame scatter suggests the 16 frames share the same speckle realization, so it reflects noise only and not independent speckle statistics. (3) The autocorrelation normalization printed divide-by-zero warnings at lags with no overlap. I did not verify that the fitted lags were unaffected. (4) Auto exposure, auto gain, gamma and LUT could not be set or verified through the available tools.
+Reason: A VERIFIED script measurement of contrast and grain size exists with a non-saturating exposure, so the run can be closed with caveats.
+
+Thread finished. VERIFIED: {"tool": "coding_tool", "script": "analysis.py", "results": {"MAX_DN": 3244.0, "NSAT": 0.0, "MAX_FRAC": 0.7922, "DARK_MEAN": 40.004, "DARK_VAR": 6.3383, "ROI_X0": 255.0, "ROI_Y0": 192.0, "ROI_N": 128.0, "SAT_IN_ROI": 0.0, "ENVELOPE_VAR": 0.434, "CONTRAST_MEAN": 0.9648, "CONTRAST_STD": 0.0003, "PTC_SLOPE": 0.4966, "K_EST": 2.0138, "CONTRAST_CORR": 0.9639, "GRAIN_FWHM_X_PX": 2.896, "GRAIN_FWHM_Y_PX": 2.736, "GRAIN_FWHM_RADIAL_PX": 2.706, "GRAIN_STD_PX": 0.001}}
+Saved in C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\uc3_speckle

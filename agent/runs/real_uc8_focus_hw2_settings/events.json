@@ -1,0 +1,7 @@
+[
+ {
+  "type": "request",
+  "text": "Do not use the camera. The lab camera (Hikrobot MV-CS028-10UM) was measured in an earlier run: conversion gain 6.14 e-/DN, read noise 5.78 e-, full well at least 24766 e-. With the focusing tool, compare the focusing enhancement at the Homework 2 settings (macropixel 4, focus_size 3, bg_inner 6, bg_outer 20, bg_regions 8, iterations 40000, flips 4, remeasure true) for the bench's default camera and for this measured camera, with the bench signal level chosen so that the focus does not saturate this camera. Report both enhancements.",
+  "time": 1791999168.3116684
+ }
+]

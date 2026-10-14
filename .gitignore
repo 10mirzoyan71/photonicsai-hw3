@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.idea/
+agent/runs/checkpoints.sqlite*
+report/*.aux
+report/*.log
+report/*.out
+*_console.log
+# raw camera frames (hundreds of MB); each capture also has a .png preview and is listed in calls.jsonl
+*.npy

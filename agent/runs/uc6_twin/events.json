@@ -1,0 +1,7 @@
+[
+ {
+  "type": "request",
+  "text": "Measure this camera's read noise, conversion gain and full well capacity in electrons. Then use these measured numbers as the camera of the Homework 2 focusing bench and predict the focusing enhancement we can expect with this camera, choosing the bench signal level so that the focus does not saturate it.",
+  "time": 1791977341.0319965
+ }
+]

@@ -1,0 +1,354 @@
+USER: Measure this camera's read noise, conversion gain and full well capacity in electrons. Then use these measured numbers as the camera of the Homework 2 focusing bench and predict the focusing enhancement we can expect with this camera, choosing the bench signal level so that the focus does not saturate it.
+
+================== ORCHESTRATOR ==================
+Decision 1/14 -> scientist
+Instruction: Produce a numbered plan to measure this camera's read noise (e-), conversion gain (e-/DN or DN/e-), and full well capacity (e-) using the camera's MCP tools: which settings to fix (gain, black level, exposure range, ROI, bit depth), which frames to capture (dark frames/bias pairs, flat-field pairs at increasing exposure for a photon transfer curve up to saturation), the formulas (pair-difference variance, PTC slope, read noise from dark variance times gain, full well from saturation/PTC knee), and the frame counts. Then specify how the measured values (read noise, gain, full well, bit depth) feed the Homework 2 simulated focusing bench camera parameters, and how to choose the bench signal level so the focused spot peak stays below the measured full well (state the headroom rule, e.g. peak <= ~80% of full well), and what enhancement to predict. Keep it concise and executable by the hardware and executor roles.
+Reason: A measurement plan with formulas and the bench-linking rule is needed before any hardware work.
+
+================== SCIENTIST ==================
+# Plan: camera characterization → HW2 focusing bench prediction
+
+## 1. Quantities and definitions
+- **K** [e-/DN]: conversion gain, at a fixed gain setting.
+- **Read noise σ_r** [e- rms]: temporal noise at zero signal and the shortest exposure, σ_r = K·σ_dark,DN.
+- **Full well N_FW** [e-]: the largest signal still on the linear part of the photon transfer curve (PTC), N_FW = K·(DN_sat − DN_dark). If DN_sat is the ADC ceiling (2^bits − 1) and not a real pixel saturation, report N_FW as ADC-limited (a lower bound) and say so.
+
+## 2. Physics and formulas
+- Pair difference (removes fixed-pattern noise): for frames A and B at the same exposure and ROI, temporal variance = var(A−B)/2.
+- Photon transfer: var_DN = (mean_DN − dark_DN)/K + σ_dark,DN². The slope of var vs. signal is 1/K, so K = 1/slope [e-/DN].
+- Signal in electrons: S_e = K·(mean_DN − dark_DN). Shot-noise check: var_e = S_e.
+- Dark offset (black level): the mean of dark frames at the same exposure.
+- Saturation onset: the signal where the variance peaks and then drops, or where mean vs. exposure departs from the linear fit by more than 2%. Take the last point before that.
+- Source stability: use a DC/LED source if possible. If the light is mains-powered, flicker at 2× mains makes the frame mean fluctuate, so make every exposure a whole multiple of 10 ms (50 Hz mains) or 8.33 ms (60 Hz). Check that the A/B means agree within ~0.5%, otherwise reject the pair.
+
+## 3. Fixed settings (the hardware role reads them back and records them)
+- Query the allowed ranges first (exposure min/max, gain, black level, pixel formats, ROI limits) and stay inside them and inside the lab limits.
+- Pixel format: the highest bit depth offered (Mono12 preferred, else Mono10). Record the bit depth.
+- Gain: the minimum (0 dB), fixed for the whole run. Gain auto, exposure auto, gamma, LUT, digital shift, sharpness, denoise and any other correction: off. Black level: fixed, with no auto, and the value recorded.
+- ROI: a central 256×256 window (or the largest uniform area), identical for all frames. Temperature and trigger mode: free-run, with no changes between frames.
+- Illumination: uniform and defocused, or through a diffuser, with the camera lens/aperture unchanged between frames. Vary only the exposure time (light level fixed).
+
+## 4. Frame plan
+- **Darks** (lens capped, light off): 20 pairs at the minimum exposure → σ_r and bias. Also 5 pairs at a long exposure (~100 ms or the max allowed) → dark current check.
+- **Flats*
+
+================== ORCHESTRATOR ==================
+Decision 2/14 -> hardware
+Instruction: Execute plan steps 1-4. (1) Query and log all parameter ranges (exposure min/max, gain, black level, pixel formats, ROI limits). Set and read back: highest bit depth (Mono12 else Mono10), gain minimum, auto gain/exposure off, gamma/LUT/sharpness/denoise off, fixed black level, central ROI 256x256, free-run. (2) Capture 20 dark pairs at minimum exposure (lens capped/light off) and 5 dark pairs at long exposure (~100 ms or max). (3) With uniform flat illumination, choose the light level so the longest exposure saturates and the shortest is >20 DN above dark; take a test frame to check. (4) Capture flat pairs at ~25 geometrically spaced exposures up to saturation, plus 3 post-saturation levels, 4 frames at the 3 brightest levels; use exposures that are multiples of 10 ms if the source is mains-powered. Save all frames as npy with a JSON log (exposure, gain, black level, bit depth, ROI, timestamp) in the scratchpad and report the file paths, the settings read back and any command failures. Do not guess values; report failures as they are.
+Reason: Frames must be captured from the camera before any analysis can be done.
+
+================== INSTRUMENT [start] ==================
+camera_info -> {"vendor": "Hikrobot", "model": "MV-CS028-10UM", "sensor_width": 1936, "sensor_height": 1464, "bit_depth": 12, "max_dn": 4095, "exposure_range_us": [9.0, 9999839.0], "gain_range_db": [0.0, 23.981199264526367], "exposure_us": 10000.0, "gain_db": 0.0, "roi": {"x": 768, "y": 532, "width": 400, "height": 400}, "illumination_control": false, "lab_limits": {"max_exposure_us": 500000, "max_gain_db": 24, "max_frames": 16}}
+
+================== EXECUTOR [decide] ==================
+Hardware step 1: set_roi {"x": 840, "y": 604, "width": 256, "height": 256}, then capture 1 frame(s)
+Reason: Set the central 256x256 ROI as planned (x=840, y=604 centers it on 1936x1464); gain is already 0 dB.
+
+================== INSTRUMENT [command] ==================
+set_roi {"x": 840, "y": 604, "width": 256, "height": 256} -> ok {"roi": {"x": 840, "y": 604, "width": 256, "height": 256}}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 10000 us, 0 dB, ROI 256x256+840+604: mean 63.46 DN, std 1.12, max 74, p99.9 67.0 (0.0164 of full scale), saturated 0 px (0.0); file camera/cap001_roi_set.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 2: ask the person: Please fully block the light (cap the lens or switch the source off) so the camera sees darkness, then reply when done.
+Reason: Illumination is not software controlled, so a person must block the light (cap the lens) for the dark frames.
+
+######################################################################
+# GRAPH PAUSED on thread 'real_uc6_focus_prediction' (person_action)
+# question: Please fully block the light (cap the lens or switch the source off) so the camera sees darkness, then reply when done.
+######################################################################
+
+Paused. Resume with:  python run_hw3.py --thread real_uc6_focus_prediction --reply "<your reply>"
+
+================== HUMAN [person] ==================
+Done: the lens is covered and the light is blocked.
+
+================== EXECUTOR [decide] ==================
+Hardware step 3: set_exposure {"exposure_us": 9}, then capture 16 frame(s)
+Reason: Set minimum exposure for the dark frames now that the light is blocked.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 9} -> ok {"exposure_us": 9.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 9 us, 0 dB, ROI 256x256+840+604: mean 62.54 DN, std 0.95, max 70, p99.9 65.0 (0.0159 of full scale), saturated 0 px (0.0); regions {"roi": {"mean_dn": 62.54, "std_dn": 0.95, "max_dn": 70, "pixels": 65536}}; temporal noise 0.9414 DN rms (var 0.8862, mean 61.793); file camera/cap002_dark_min.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 4: set_exposure {"exposure_us": 100000}, then capture 10 frame(s)
+Reason: Long-exposure dark frames (100 ms) for the dark current check while the light is still blocked; 16 frames is the lab max per capture.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 100000} -> ok {"exposure_us": 100000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 10 frame(s) at 100000 us, 0 dB, ROI 256x256+840+604: mean 63.37 DN, std 1.18, max 153, p99.9 67.0 (0.0164 of full scale), saturated 0 px (0.0); temporal noise 1.0984 DN rms (var 1.2066, mean 63.388); file camera/cap003_dark_long.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 5: ask the person: Please uncover the lens and unblock the light so the camera sees a uniform, defocused or diffused flat field. Keep the lens aperture unchanged for the rest of the run. Tell me if the source is mains-powered (flicker) or DC/LED, and reply when done.
+Reason: Dark frames are done; the light must be unblocked and made uniform for the flat-field series, since illumination is not software controlled.
+
+######################################################################
+# GRAPH PAUSED on thread 'real_uc6_focus_prediction' (person_action)
+# question: Please uncover the lens and unblock the light so the camera sees a uniform, defocused or diffused flat field. Keep the lens aperture unchanged for the rest of the run. Tell me if the source is mains-powered (flicker) or DC/LED, and reply when done.
+######################################################################
+
+Paused. Resume with:  python run_hw3.py --thread real_uc6_focus_prediction --reply "<your reply>"
+
+================== HUMAN [person] ==================
+Done: the lens is uncovered and the camera sees the white wall again. The room lights are LED and switched on; the wall is next to a window, so some daylight also reaches it.
+
+================== EXECUTOR [decide] ==================
+Hardware step 6: capture 2 frame(s) with the current settings
+Reason: Test frame of the flat wall at 100 ms to see the light level before choosing exposures.
+
+================== INSTRUMENT [measure] ==================
+capture -> 2 frame(s) at 100000 us, 0 dB, ROI 256x256+840+604: mean 4093.0 DN, std 0.0, max 4093, p99.9 4093.0 (0.9995 of full scale), saturated 0 px (0.0); regions {"roi": {"mean_dn": 4093.0, "std_dn": 0.0, "max_dn": 4093, "pixels": 65536}}; temporal noise 0.0 DN rms (var 0.0, mean 4093.0); file camera/cap004_flat_test_100ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 7: set_exposure {"exposure_us": 20000}, then capture 2 frame(s)
+Reason: 100 ms flat is saturated (4093 DN) while 10 ms earlier was near dark, so probe 20 ms to find the linear range.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 20000} -> ok {"exposure_us": 20000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 2 frame(s) at 20000 us, 0 dB, ROI 256x256+840+604: mean 3550.32 DN, std 28.06, max 3667, p99.9 3636.0 (0.8879 of full scale), saturated 0 px (0.0); temporal noise 23.8926 DN rms (var 570.8578, mean 3548.779); file camera/cap005_flat_test_20ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 8: set_exposure {"exposure_us": 10000}, then capture 2 frame(s)
+Reason: 20 ms is at 3550 DN (near but below saturation); step down to 10 ms for a mid-range flat pair, since few steps remain.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 10000} -> ok {"exposure_us": 10000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 2 frame(s) at 10000 us, 0 dB, ROI 256x256+840+604: mean 1819.78 DN, std 18.78, max 1900, p99.9 1878.0 (0.4586 of full scale), saturated 0 px (0.0); temporal noise 17.0794 DN rms (var 291.7059, mean 1820.321); file camera/cap006_flat_10ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 9: set_exposure {"exposure_us": 3000}, then capture 8 frame(s)
+Reason: Add a low-signal flat point (3 ms) for the PTC; several frames give a better variance estimate.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 3000} -> ok {"exposure_us": 3000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 8 frame(s) at 3000 us, 0 dB, ROI 256x256+840+604: mean 587.78 DN, std 9.89, max 632, p99.9 618.0 (0.1509 of full scale), saturated 0 px (0.0); temporal noise 9.4106 DN rms (var 88.5592, mean 587.862); file camera/cap007_flat_3ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 10: set_exposure {"exposure_us": 23000}, then capture 4 frame(s)
+Reason: Probe near the expected knee (~23 ms from the 177 DN/ms slope) to locate saturation onset.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 23000} -> ok {"exposure_us": 23000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 4 frame(s) at 23000 us, 0 dB, ROI 256x256+840+604: mean 4071.6 DN, std 22.66, max 4093, p99.9 4093.0 (0.9995 of full scale), saturated 0 px (0.0); temporal noise 19.4636 DN rms (var 378.8302, mean 4071.331); file camera/cap008_flat_23ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 11: set_exposure {"exposure_us": 6000}, then capture 6 frame(s)
+Reason: Add a mid-low PTC point at 6 ms with several frames before the step budget ends.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 6000} -> ok {"exposure_us": 6000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 6 frame(s) at 6000 us, 0 dB, ROI 256x256+840+604: mean 1107.92 DN, std 14.09, max 1168, p99.9 1151.0 (0.2811 of full scale), saturated 0 px (0.0); temporal noise 13.2053 DN rms (var 174.3799, mean 1108.181); file camera/cap009_flat_6ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 12: finish: Partial capture only. Camera: Hikrobot MV-CS028-10UM, 12-bit (max_dn 4095), exposure range 9 to 9999839 us, gain range 0 to 23.98 dB, lab limits 500000 us, 24 dB, 16 frames per capture. Settings read back: gain 0 dB, ROI 256x256 at (840,604). Black level, auto-feature states, pixel format and gamma/LUT were NOT queried or set, because no command tool for them was used. Free-run was not verified. Illumination: LED room lights plus some daylight on a white wall, so it is not a controlled flat field. Frames are saved in the camera folder, and no JSON log was written.
+Darks (light blocked): 16 frames at 9 us gave mean 62.54 DN and temporal noise 0.9414 DN rms (var 0.8862) (cap002_dark_min.npy). 10 frames at 100 ms gave mean 63.37 DN and temporal noise 1.0984 DN rms (var 1.2066) (cap003_dark_long.npy). This used multi-frame captures, not the 20 and 5 pairs planned.
+Flats (temporal var in DN^2, mean in DN):
+- 3 ms, 8 frames: mean 587.86, var 88.56 (cap007_flat_3ms.npy).
+- 6 ms, 6 frames: mean 1108.18, var 174.38 (cap009_flat_6ms.npy).
+- 10 ms, 2 frames: mean 1820.32, var 291.71 (cap006_flat_10ms.npy).
+- 20 ms, 2 frames: mean 3548.78, var 570.86 (cap005_flat_test_20ms.npy).
+- 23 ms, 4 frames: mean 4071.33, var 378.83, max 4093, so it is at or near saturation (cap008_flat_23ms.npy).
+- 100 ms, 2 frames: mean 4093.0, var 0, fully clipped at 4093 DN (cap004_flat_test_100ms.npy).
+Only 5 unsaturated or near-knee flat levels were taken, not the ~25 planned. There are no post-saturation levels beyond 100 ms, and no 4-frame sets at the 3 brightest levels.
+Observations: the saturation ceiling is 4093 DN, not 4095. Variance rises roughly linearly with signal: about 0.15 DN^2 per DN from 3 to 6 ms, and about 0.16 DN^2 per DN at 20 ms. A rough slope is about 0.15 to 0.16 DN^2/DN, which would suggest K near 6 to 7 e-/DN. That is only an eyeball estimate and not an analysis result. The wall brightness may drift with daylight, so the flat is not stable. No command failures occurred except that set_illumination is unavailable (no software illumination control).
+Not done: the full PTC sweep, the analysis script, and the read noise, conversion gain and full well numbers. A further hardware turn with more steps is needed, or the analysis can run on the existing frames as a rough result.
+Reason: Step budget (12) is used up; report what was captured and what is missing.
+
+================== EXECUTOR [report] ==================
+Hardware turn report: Partial capture only. Camera: Hikrobot MV-CS028-10UM, 12-bit (max_dn 4095), exposure range 9 to 9999839 us, gain range 0 to 23.98 dB, lab limits 500000 us, 24 dB, 16 frames per capture. Settings read back: gain 0 dB, ROI 256x256 at (840,604). Black level, auto-feature states, pixel format and gamma/LUT were NOT queried or set, because no command tool for them was used. Free-run was not verified. Illumination: LED room lights plus some daylight on a white wall, so it is not a controlled flat field. Frames are saved in the camera folder, and no JSON log was written.
+Darks (light blocked): 16 frames at 9 us gave mean 62.54 DN and temporal noise 0.9414 DN rms (var 0.8862) (cap002_dark_min.npy). 10 frames at 100 ms gave mean 63.37 DN and temporal noise 1.0984 DN rms (var 1.2066) (cap003_dark_long.npy). This used multi-frame captures, not the 20 and 5 pairs planned.
+Flats (temporal var in DN^2, mean in DN):
+- 3 ms, 8 frames: mean 587.86, var 88.56 (cap007_flat_3ms.npy).
+- 6 ms, 6 frames: mean 1108.18, var 174.38 (cap009_flat_6ms.npy).
+- 10 ms, 2 frames: mean 1820.32, var 291.71 (cap006_flat_10ms.npy).
+- 20 ms, 2 frames: mean 3548.78, var 570.86 (cap005_flat_test_20ms.npy).
+- 23 ms, 4 frames: mean 4071.33, var 378.83, max 4093, so it is at or near saturation (cap008_flat_23ms.npy).
+- 100 ms, 2 frames: mean 4093.0, var 0, fully clipped at 4093 DN (cap004_flat_test_100ms.npy).
+Only 5 unsaturated or near-knee flat levels were taken, not the ~25 planned. There are no post-saturation levels beyond 100 ms, and no 4-frame sets at the 3 brightest levels.
+Observations: the saturation ceiling is 4093 DN, not 4095. Variance rises roughly linearly with signal: about 0.15 DN^2 per DN from 3 to 6 ms, and about 0.16 DN^2 per DN at 20 ms. A rough slope is about 0.15 to 0.16 DN^2/DN, which would suggest K near 6 to 7 e-/DN. That is only an eyeball estimate and not an analysis result. The wall brightness may drift with daylight, so the flat is not stable. No command failures occurred except that set_illumination is unavailable (no software illumination control).
+Not done: the full PTC sweep, the analysis script, and the read noise, conversion gain and full well numbers. A further hardware turn with more steps is needed, or the analysis can run on the existing frames as a rough result.
+
+[instrument record]
+commands: 8 (8 applied), captures: 9
+  set_roi {"x": 840, "y": 604, "width": 256, "height": 256} -> ok
+  capture 1 frame(s) at 10000 us, 0 dB, ROI 256x256+8
+
+================== ORCHESTRATOR ==================
+Decision 3/14 -> executor
+Instruction: Run one Python script (python -I) on the saved frames in camera/ (cap002 and cap003 darks; flats cap007 3ms, cap009 6ms, cap006 10ms, cap005 20ms, cap008 23ms, cap004 100ms). For each flat compute mean_DN and temporal variance from consecutive-frame differences over the ROI. Take dark_DN from cap002. Fit var_DN against (mean_DN - dark_DN) on the unsaturated linear points (3, 6, 10, 20 ms; exclude 23 ms and 100 ms because they are clipped) and print the slope, intercept and R2. Print these NAME=value lines: BITS=12, K_E_PER_DN=1/slope, READ_NOISE_E=K*sigma_dark_DN (cap002), a cross-check READ_NOISE_E_PTC=K*sqrt(max(intercept,0)), DARK_DN, DN_SAT (the observed ceiling, 4093), FULL_WELL_E=K*(DN_SAT-DARK_DN), FULL_WELL_ADC_LIMITED=true (the ceiling is flat clipping), PTC_LINEAR_R2, N_POINTS_FIT. Check K on the lower and upper halves of the fit and print them as CHECK_ lines. Use only measured values and state that this is a coarse 4-point PTC with an uncontrolled source and no black-level or auto-feature queries. Then read the HW2 bench code in ~/PyCharmMiscProject/hw2 and use the focusing tool with the measured camera parameters: read noise, full well, gain K, 12 bits and the dark offset. Choose the bench signal level B = 0.8*FULL_WELL_E/(1.2*eta_pred) from a first estimate of eta. Run several seeds and print BENCH_SIGNAL_B_E, BENCH_PEAK_E, BENCH_PEAK_FRAC_FW, ETA_IDEAL, ETA_SIM_MEAN, ETA_SIM_STD and a saturation flag. Also check B/sqrt(B+read_noise^2) >= 10. Report the results, labelled as a simulation for the bench numbers.
+Reason: Existing frames suffice for a coarse PTC, and the bench prediction needs the analysis script and the simulation.
+  [bench] experiment 1: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 275.0, "intensity_noise": 0.01}
+  [bench] experiment 1: iteration 600/6000, enhancement 8.2
+  [bench] experiment 1: iteration 1200/6000, enhancement 9.7
+  [bench] experiment 1: iteration 1800/6000, enhancement 10.3
+  [bench] experiment 1: iteration 2400/6000, enhancement 10.0
+  [bench] experiment 1: iteration 3000/6000, enhancement 10.3
+  [bench] experiment 1: iteration 3600/6000, enhancement 10.3
+  [bench] experiment 1: iteration 4200/6000, enhancement 10.3
+  [bench] experiment 1: iteration 4800/6000, enhancement 10.5
+  [bench] experiment 1: iteration 5400/6000, enhancement 10.4
+  [bench] experiment 1: iteration 6000/6000, enhancement 11.1
+  [bench] experiment 1 done: enhancement 10.6 +/- 0.2 (vs far field 8.6) (64 segments, 1.09 s) -> C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction\work\bench\experiment_01.png
+  [bench] experiment 2: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 275.0, "intensity_noise": 0.01}
+  [bench] experiment 2: iteration 600/6000, enhancement 8.8
+  [bench] experiment 2: iteration 1200/6000, enhancement 9.4
+  [bench] experiment 2: iteration 1800/6000, enhancement 9.7
+  [bench] experiment 2: iteration 2400/6000, enhancement 10.2
+  [bench] experiment 2: iteration 3000/6000, enhancement 9.8
+  [bench] experiment 2: iteration 3600/6000, enhancement 10.2
+  [bench] experiment 2: iteration 4200/6000, enhancement 10.5
+  [bench] experiment 2: iteration 4800/6000, enhancement 10.7
+  [bench] experiment 2: iteration 5400/6000, enhancement 10.4
+  [bench] experiment 2: iteration 6000/6000, enhancement 10.2
+  [bench] experiment 2 done: enhancement 10.1 +/- 0.2 (vs far field 8.0) (64 segments, 1.02 s) -> C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction\work\bench\experiment_02.png
+  [bench] experiment 3: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 275.0, "intensity_noise": 0.01}
+  [bench] experiment 3: iteration 600/6000, enhancement 8.6
+  [bench] experiment 3: iteration 1200/6000, enhancement 10.2
+  [bench] experiment 3: iteration 1800/6000, enhancement 10.2
+  [bench] experiment 3: iteration 2400/6000, enhancement 10.4
+  [bench] experiment 3: iteration 3000/6000, enhancement 10.5
+  [bench] experiment 3: iteration 3600/6000, enhancement 10.1
+  [bench] experiment 3: iteration 4200/6000, enhancement 10.9
+  [bench] experiment 3: iteration 4800/6000, enhancement 10.9
+  [bench] experiment 3: iteration 5400/6000, enhancement 10.5
+  [bench] experiment 3: iteration 6000/6000, enhancement 11.0
+  [bench] experiment 3 done: enhancement 10.7 +/- 0.2 (vs far field 8.5) (64 segments, 1.02 s) -> C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction\work\bench\experiment_03.png
+
+================== EXECUTOR ==================
+Camera numbers (script, coarse 4-point PTC, uncontrolled source, no black-level/auto-feature queries): BITS=12, DARK_DN=61.793, K_E_PER_DN=6.1435, READ_NOISE_E=5.783 (dark frames), READ_NOISE_E_PTC=12.178 (PTC intercept; disagrees ~2x, not trusted), DN_SAT=4093, FULL_WELL_E=24766 (FULL_WELL_ADC_LIMITED=true, so a lower bound), PTC_LINEAR_R2=0.99997, N_POINTS_FIT=4, CHECK_K_LOWER_HALF=6.0629, CHECK_K_UPPER_HALF=6.1918.
+
+Bench simulation (focusing tool; read noise 5.783 e-, full well 24766 e-, mean signal 275 e-/px, intensity noise 0.01, macropixel 8 = 64 segments, focus 3 px, ring 5-15 px, 8 regions, 6000 iterations): enhancement 10.63 (std 0.18), 10.12 (std 0.17), 10.66 (std 0.16) in three runs, with 0 saturated pixels in each. So expect an enhancement of roughly 10-11 with this camera at this signal level (simulated).
+
+Not done: BENCH_PEAK_E, BENCH_PEAK_FRAC_FW, ETA_IDEAL and the B/sqrt(B+sigma_r^2) check were not computed. The 275 e-/px signal level was my choice and was not derived from the 0.8*FW/(1.2*eta) rule. The runs at 1500 e-/px were refused by the 3-experiments-per-turn limit. The HW2 bench code was not read, and the dark offset was not passed because the tool has no argument for it. A further turn is needed for these.
+
+[tool record]
+write ptc.py: ok
+run ptc.py: exit code 0, 0.2 s
+VERIFIED printed by the script: {'DARK_DN': 61.793, 'DARK_VAR_DN2': 0.8862, 'DARK_LONG_MEAN_DN': 63.388, 'DARK_LONG_VAR_DN2': 1.2066, 'SLOPE': 0.16277, 'INTERCEPT': 3.929, 'BITS': 12.0, 'K_E_PER_DN': 6.1435, 'READ_NOISE_E': 5.783, 'READ_NOISE_E_PTC': 12.178, 'DN_SAT': 4093.0, 'FULL_WELL_E': 24766.0, 'PTC_LINEAR_R2': 0.99997, 'N_POINTS_FIT': 4.0, 'CHECK_K_LOWER_HALF': 6.0629, 'CHECK_K_UPPER_HALF': 6.1918}
+experiment 1: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null} -> enhancement 10.63 +/- 0.18 (far field 8.56), 64 segments, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 275.0, "intensity_noise": 0.01}, 0 saturated px in the final image
+experiment 2: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null} -> enhancement 10.12 +/- 0.17 (far field 7.96), 64 segments, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e"
+
+================== ORCHESTRATOR ==================
+Decision 4/14 -> executor
+Instruction: Run the focusing tool with the measured camera (read_noise_e 5.783, full_well_e 24766, same settings as before: macropixel 8, focus 3, ring 5-15, 8 regions, 6000 iterations) at mean_signal_e = 1500 e-/px. This is the rule-based level: B = 0.8*24766/(1.2*10.6) is about 1557 e-/px. Use at most 3 experiments in this turn (three seeds). Report the enhancement mean and std and the saturated pixel count for each. Then print by script, using only returned values: BENCH_SIGNAL_B_E=1500, BENCH_PEAK_E, which is about eta*B (estimate it from the mean enhancement, and say so if the tool does not return the focus peak), BENCH_PEAK_FRAC_FW = peak/24766, ETA_IDEAL = (pi/4)*(64-1)+1, ETA_SIM_MEAN, ETA_SIM_STD, a saturation flag, and the check B/sqrt(B+5.783^2) >= 10. If the tool has no dark-offset argument, say so. Label the bench numbers as simulation. Do not run any other experiments.
+Reason: The previous bench runs used an arbitrary 275 e-/px signal, so the rule-based signal level and the peak-versus-full-well numbers are still missing.
+  [bench] experiment 4: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 1500.0, "intensity_noise": 0.01}
+  [bench] experiment 4: iteration 600/6000, enhancement 8.3
+  [bench] experiment 4: iteration 1200/6000, enhancement 9.9
+  [bench] experiment 4: iteration 1800/6000, enhancement 9.9
+  [bench] experiment 4: iteration 2400/6000, enhancement 10.1
+  [bench] experiment 4: iteration 3000/6000, enhancement 10.3
+  [bench] experiment 4: iteration 3600/6000, enhancement 10.7
+  [bench] experiment 4: iteration 4200/6000, enhancement 10.6
+  [bench] experiment 4: iteration 4800/6000, enhancement 10.8
+  [bench] experiment 4: iteration 5400/6000, enhancement 10.8
+  [bench] experiment 4: iteration 6000/6000, enhancement 11.0
+  [bench] experiment 4 done: enhancement 11.0 +/- 0.1 (vs far field 8.4) (64 segments, 0.94 s) -> C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction\work\bench\experiment_04.png
+  [bench] experiment 5: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 1500.0, "intensity_noise": 0.01}
+  [bench] experiment 5: iteration 600/6000, enhancement 9.3
+  [bench] experiment 5: iteration 1200/6000, enhancement 9.7
+  [bench] experiment 5: iteration 1800/6000, enhancement 10.1
+  [bench] experiment 5: iteration 2400/6000, enhancement 10.1
+  [bench] experiment 5: iteration 3000/6000, enhancement 10.1
+  [bench] experiment 5: iteration 3600/6000, enhancement 10.7
+  [bench] experiment 5: iteration 4200/6000, enhancement 10.7
+  [bench] experiment 5: iteration 4800/6000, enhancement 10.8
+  [bench] experiment 5: iteration 5400/6000, enhancement 10.9
+  [bench] experiment 5: iteration 6000/6000, enhancement 10.9
+  [bench] experiment 5 done: enhancement 10.8 +/- 0.1 (vs far field 8.4) (64 segments, 0.94 s) -> C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction\work\bench\experiment_05.png
+  [bench] experiment 6: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 1500.0, "intensity_noise": 0.01}
+  [bench] experiment 6: iteration 600/6000, enhancement 9.4
+  [bench] experiment 6: iteration 1200/6000, enhancement 9.6
+  [bench] experiment 6: iteration 1800/6000, enhancement 9.7
+  [bench] experiment 6: iteration 2400/6000, enhancement 10.1
+  [bench] experiment 6: iteration 3000/6000, enhancement 9.9
+  [bench] experiment 6: iteration 3600/6000, enhancement 10.3
+  [bench] experiment 6: iteration 4200/6000, enhancement 10.4
+  [bench] experiment 6: iteration 4800/6000, enhancement 10.8
+  [bench] experiment 6: iteration 5400/6000, enhancement 10.7
+  [bench] experiment 6: iteration 6000/6000, enhancement 10.7
+  [bench] experiment 6 done: enhancement 10.7 +/- 0.0 (vs far field 8.8) (64 segments, 0.93 s) -> C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction\work\bench\experiment_06.png
+
+================== EXECUTOR ==================
+Bench results (SIMULATION, measured camera: read noise 5.783 e-, full well 24766 e-, intensity noise 0.01, mean signal 1500 e-/px, macropixel 8 = 64 segments, focus 3 px, ring 5-15 px, 8 regions, 6000 iterations):
+
+Per seed (tool output):
+- Seed 1: enhancement 10.999984, std 0.0700, saturated px 0
+- Seed 2: enhancement 10.845283, std 0.0741, saturated px 0
+- Seed 3: enhancement 10.671304, std 0.0239, saturated px 0
+
+The script printed:
+BENCH_SIGNAL_B_E=1500
+BENCH_PEAK_E_ESTIMATE_ETA_X_B=16258.3
+BENCH_PEAK_FRAC_FW=0.6565
+ETA_IDEAL=50.48
+ETA_SIM_MEAN=10.839
+ETA_SIM_STD=0.164
+SATURATION_FLAG=False
+B_SNR_CHECK=38.31
+B_SNR_GE_10=True
+
+Notes:
+- The tool does not return the focus peak. BENCH_PEAK_E is an estimate (mean enhancement × B), not a measurement.
+- The tool has no dark-offset argument, so the dark offset (61.8 DN) was not passed to it.
+- ETA_SIM_STD is the spread over 3 seeds. The within-run stds are listed above.
+- Simulated enhancement is about 10.8, well below the ideal 50.48. The script did not test why. The tool also returned an enhancement_initial of 1.83 for seed 1, against 0.18 and 0.42 for seeds 2 and 3.
+- With the 1500 e-/px signal, the estimated peak is about 66% of full well, and the run shows no saturation.
+- The camera numbers behind this come from the earlier coarse 4-point PTC with an uncontrolled light source. Its full well is ADC-limited, so 24766 e- is a lower bound.
+
+[tool record]
+write bench_summary.py: ok
+run bench_summary.py: exit code 0, 0.2 s
+VERIFIED printed by the script: {'BENCH_SIGNAL_B_E': 1500.0, 'BENCH_PEAK_E_ESTIMATE_ETA_X_B': 16258.3, 'BENCH_PEAK_FRAC_FW': 0.6565, 'ETA_IDEAL': 50.48, 'ETA_SIM_MEAN': 10.839, 'ETA_SIM_STD': 0.164, 'B_SNR_CHECK': 38.31}
+experiment 4: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null} -> enhancement 11.00 +/- 0.07 (far field 8.36), 64 segments, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 1500.0, "intensity_noise": 0.01}, 0 saturated px in the final image
+experiment 5: {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null} -> enhancement 10.85 +/- 0.07 (far field 8.43), 64 segments, camera model {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 150
+
+================== ORCHESTRATOR ==================
+Decision 5/14 -> finish
+Instruction: FINAL REPORT (Hikrobot MV-CS028-10UM, 12-bit, 0 dB, ROI 256x256 at (840,604)). The camera numbers are coarse. They come from a 4-point photon transfer curve (PTC) on an uncontrolled light source: a white wall lit by LED room lights plus some daylight.
+
+CAMERA (script-verified):
+- Conversion gain K = 6.1435 e-/DN. The lower-half fit gives 6.0629 and the upper-half fit gives 6.1918. PTC R2 = 0.99997, N_POINTS_FIT = 4 (exposures 3, 6, 10 and 20 ms).
+- Read noise = 5.783 e- rms, from the dark temporal noise of 0.9414 DN at 9 us exposure. The PTC intercept gives 12.18 e-, which disagrees by about 2x, so I don't trust it. The dark-frame value is the better estimate.
+- Dark offset = 61.793 DN.
+- Saturation ceiling = 4093 DN, where the frames clip flat. Full well = 24766 e-. This is ADC-limited, so it is a lower bound and not a measured pixel saturation.
+
+LIMITS OF THE MEASUREMENT:
+- Only 4 linear PTC points were taken, not the ~25 planned.
+- Black level, auto-feature states, pixel format and free-run were not queried or set. No JSON log was written.
+- The flat field is not stable because of daylight.
+
+BENCH PREDICTION (SIMULATION, HW2 focusing tool):
+- Camera model: read noise 5.783 e-, full well 24766 e-, intensity noise 0.01.
+- Bench settings: 64 segments (macropixel 8), focus 3 px, ring 5-15 px, 8 regions, 6000 iterations.
+- Bench signal level B = 1500 e-/px, from the rule B = 0.8*FW/(1.2*eta_pred) with eta_pred about 10.6.
+- Enhancement over 3 seeds: 11.00, 10.85 and 10.67. Mean 10.84, std 0.164 across seeds. There were 0 saturated pixels in every run.
+- BENCH_PEAK_E is about 16258 e-. This is an estimate (eta x B), because the tool does not return the focus peak. It is about 66% of full well (BENCH_PEAK_FRAC_FW = 0.6565), so the focus does not saturate. SATURATION_FLAG = False.
+- B/sqrt(B+sigma_r^2) = 38.3, which is at least 10.
+- An earlier run at B = 275 e-/px gave enhancement 10.1 to 10.7, so the result is insensitive to signal level in this range.
+
+PREDICTION: expect a focusing enhancement of about 10.8 (roughly 10.7 to 11.0) with this camera. This is a simulated value.
+
+CAVEATS:
+- The ideal noise-free enhancement is 50.48, and the simulated value is far below it. The cause was not investigated, so I cannot say whether camera noise limits it.
+- The simulation's enhancement was already about 10 at 275 e-/px, which suggests the limit is the bench's own settings (segments, iterations, noise model) and not this camera.
+- 
+
+Thread finished. VERIFIED: {"tool": "focusing_tool", "experiment": 4, "enhancement": 10.999983536677451, "enhancement_far": 8.358565469880668, "settings": {"macropixel": 8, "focus_size": 3, "bg_inner": 5, "bg_outer": 15, "bg_regions": 8, "iterations": 6000, "flips": 4, "flips_final": 1, "remeasure": true, "final_shots": 5, "focus_x": null, "focus_y": null}, "camera_model": {"read_noise_e": 5.783, "full_well_e": 24766.0, "mean_signal_e": 1500.0, "intensity_noise": 0.01}}
+Saved in C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc6_focus_prediction

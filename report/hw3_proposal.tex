@@ -1,0 +1,35 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{microtype}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+\begin{document}
+\begin{center}
+{\Large\bfseries PhotonicsAI --- AI-Driven Science and Autonomous Laboratories}\\[3pt]
+{\large Homework 3: Hardware in the Loop}\\[6pt]
+Name: Erik Mirzoyan
+\end{center}
+
+\section*{The device}
+A lab camera: the \textbf{Hikrobot MV-CS028-10UM} industrial camera (monochrome, USB~3.0, USB3~Vision), controlled
+through Hikrobot's MVS software development kit (SDK).
+
+\section*{Project description}
+Until now the agent system from Homeworks~1 and~2 has worked only with code and with a simulated optical bench.
+Connecting the camera gives it a real instrument. The camera's controls (exposure, gain, region of interest, frame
+capture and image measurements) become tools on an MCP server, and one agent, the executor, holds them. A new
+hardware turn in the graph closes the loop: the agent decides what to do, commands the camera, reads the measurement back,
+and decides again. The human stop from Homework~2 stays for setting changes and for actions only a person can do, such as
+blocking the light.
+
+With this connection the system will be able to carry out a measurement task from a plain-language request, choosing the
+settings itself and checking the result on the real image. It will set the exposure automatically so that the image uses
+most of the camera's range without saturating; characterise the camera's noise (read noise, conversion gain, full-well
+capacity) from dark frames and a photon-transfer series; find an exposure free of the room lights' flicker (mains lamps
+flicker at 100\,Hz); and check the stability of the intensity over time. The lab has no laser for this homework, so the
+camera looks at a white surface under the room lights. The measured camera parameters will then be put into the camera
+model of the Homework~2 simulated bench, so that the agent predicts the focusing enhancement a wavefront-shaping experiment
+would reach with this camera: a first step towards running the Homework~2 focusing experiment on real hardware, with the
+lab's DMDs.
+\end{document}

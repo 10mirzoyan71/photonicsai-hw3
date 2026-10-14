@@ -1,0 +1,35 @@
+[
+ {
+  "type": "request",
+  "text": "Measure this camera's read noise, conversion gain and full well capacity in electrons. Then use these measured numbers as the camera of the Homework 2 focusing bench and predict the focusing enhancement we can expect with this camera, choosing the bench signal level so that the focus does not saturate it.",
+  "time": 1791985581.8416853
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "person_action",
+   "question": "Please fully block the light (cap the lens or switch the source off) so the camera sees darkness, then reply when done.",
+   "proposed_step": null
+  },
+  "time": 1791985640.266217
+ },
+ {
+  "type": "reply",
+  "text": "Done: the lens is covered and the light is blocked.",
+  "time": 1791985696.9660826
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "person_action",
+   "question": "Please uncover the lens and unblock the light so the camera sees a uniform, defocused or diffused flat field. Keep the lens aperture unchanged for the rest of the run. Tell me if the source is mains-powered (flicker) or DC/LED, and reply when done.",
+   "proposed_step": null
+  },
+  "time": 1791985714.0707376
+ },
+ {
+  "type": "reply",
+  "text": "Done: the lens is uncovered and the camera sees the white wall again. The room lights are LED and switched on; the wall is next to a window, so some daylight also reaches it.",
+  "time": 1791985779.9770403
+ }
+]

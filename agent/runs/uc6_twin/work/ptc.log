@@ -1,0 +1,39 @@
+exit_code=0 seconds=0.7
+--- stdout ---
+SHAPE_dark= (16, 256, 256)
+SHAPE_f20us= (2, 256, 256)
+SHAPE_f5= (4, 256, 256)
+SHAPE_f20= (4, 256, 256)
+SHAPE_f40= (4, 256, 256)
+SHAPE_f60= (4, 256, 256)
+dark_mean_DN=40.001
+V_dark_DN2=6.2561
+LEVEL_f20us_S=1.31_V=6.775
+LEVEL_f5_S=305.34_V=134.132
+LEVEL_f20_S=1202.01_V=504.577
+LEVEL_f40_S=2418.11_V=1015.187
+LEVEL_f60_S=3609.87_V=1498.869
+K_e_per_DN=2.4147
+K_fit_stderr=0.0082
+read_noise_DN=2.5012
+read_noise_e=6.040
+fit_intercept_DN2=7.6757
+intercept_check_ratio=1.227
+K_nodark_fit=2.4172
+K_low_half=2.4205 K_high_half=2.4639
+sat_DN=4095
+FW_e=9791
+FW_limit=ADC (clipping at 4095 DN; no pixel-well knee observed, true pixel FW >= this)
+lin_residual_max_pct=1.346
+bits=12
+loglog_slope=0.978
+drift_pct_f60_AB=0.044
+CHECK_linear_V_vs_S=PASS
+CHECK_intercept_20pct=FAIL
+CHECK_exposure_linearity_2pct=PASS
+CHECK_dark_unclipped=PASS
+CHECK_K_halves_consistent=PASS
+CHECK_ADC_limited_FW=FLAG
+NOTE=only 4 unsaturated flat levels (plus 20us near-dark), single dark exposure, no drift recapture
+
+--- stderr ---

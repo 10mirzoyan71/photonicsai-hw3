@@ -1,0 +1,54 @@
+\subsection*{Use case 3 (real camera): stability, the person blocks the light}
+\textbf{Request:} \emph{At an exposure free of the light flicker, measure how stable the brightness is over two minutes and report the drift.}\\
+Camera: Hikrobot MV-CS028-10UM (real hardware); 4 orchestrator decisions, 8 hardware decisions, 11 MCP tool calls.
+\\{\small\textbf{Tool calls and what the instrument did:} (1)~\texttt{camera\_info} $\to$ MV-CS028-10UM, 1936x1464, 12-bit; exposure 10000.0 us, gain 0.0 dB; (2)~\texttt{capture} n\_frames=4, label=baseline\_10ms $\to$ 4 frame(s) at 10000 us, 0 dB: mean 2274.07, max 2368 DN, 0 saturate...; (3)~\texttt{set\_exposure} exposure\_us=15000.0 $\to$ exposure set to 15000 us; (4)~\texttt{capture} n\_frames=16, label=scan\_15ms $\to$ 16 frame(s) at 15000 us, 0 dB: mean 3362.9, max 3497 DN, 0 saturate...; (5)~\texttt{set\_exposure} exposure\_us=5000.0 $\to$ exposure set to 5000 us; (6)~\texttt{capture} n\_frames=16, label=scan\_5ms $\to$ 16 frame(s) at 5000 us, 0 dB: mean 1156.75, max 1221 DN, 0 saturate...; (7)~\texttt{set\_exposure} exposure\_us=10000.0 $\to$ exposure set to 10000 us; (8)~\texttt{capture} n\_frames=16, label=scan\_10ms $\to$ 16 frame(s) at 10000 us, 0 dB: mean 2244.14, max 2359 DN, 0 saturat...; (9)~\texttt{capture\_series} n\_frames=121, interval\_s=1.0, label=d... $\to$ 121 frames over 120.014 s: mean 2153.35 DN, rel. std 1.942\%, drift ...; (10)~\texttt{server\_restart\_restore} $\to$ server restarted; settings restored \{'exposure\_us': 10000.0\}; (11)~\texttt{capture} n\_frames=16, label=dark\_after $\to$ 16 frame(s) at 10000 us, 0 dB: mean 63.4, max 75 DN, 0 saturated px....}
+\\\textbf{Verified result:} script drift\_analysis.py: SLOPE\_PCT\_PER\_MIN=-3.43, TOTAL\_CHANGE\_PCT=-6.859, FLICKER\_NFRAMES\_5ms=16, FLICKER\_MEAN\_DN\_5ms=1157.
+\par\smallskip\textbf{Sequence diagram} (as above; long hardware turns shortened).
+\begin{center}\begin{tikzpicture}[x=1cm,y=-0.234cm,font=\scriptsize,>=Stealth]
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (0.00,-1.4) {User};
+\draw[gray!60,dashed] (0.00,-0.4) -- (0.00,32.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (2.30,-1.4) {Orchestrator};
+\draw[gray!60,dashed] (2.30,-0.4) -- (2.30,32.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (4.60,-1.4) {Scientist};
+\draw[gray!60,dashed] (4.60,-0.4) -- (4.60,32.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (6.90,-1.4) {Executor};
+\draw[gray!60,dashed] (6.90,-0.4) -- (6.90,32.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (9.20,-1.4) {Human};
+\draw[gray!60,dashed] (9.20,-0.4) -- (9.20,32.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (11.50,-1.4) {MCP server};
+\draw[gray!60,dashed] (11.50,-0.4) -- (11.50,32.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (13.80,-1.4) {Camera};
+\draw[gray!60,dashed] (13.80,-0.4) -- (13.80,32.5);
+\draw[->] (0.00,0.5) -- node[above,inner sep=0.5pt,font=\tiny] {request} (2.30,0.5);
+\draw[->] (2.30,1.5) -- node[above,inner sep=0.5pt,font=\tiny] {1: scientist} (4.60,1.5);
+\draw[->,dashed] (4.60,2.5) -- node[above,inner sep=0.5pt,font=\tiny] {plan} (2.30,2.5);
+\draw[->] (2.30,3.5) -- node[above,inner sep=0.5pt,font=\tiny] {2: hardware turn} (6.90,3.5);
+\draw[->] (6.90,4.5) -- node[above,inner sep=0.5pt,font=\tiny] {camera\_info} (11.50,4.5);
+\draw[->] (11.50,5.5) -- node[above,inner sep=0.5pt,font=\tiny] {read features} (13.80,5.5);
+\draw[->,dashed] (13.80,6.5) -- node[above,inner sep=0.5pt,font=\tiny] {features} (6.90,6.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,7.5) {decide: measure};
+\draw[->] (6.90,8.5) -- node[above,inner sep=0.5pt,font=\tiny] {capture} (11.50,8.5);
+\draw[->] (11.50,9.5) -- node[above,inner sep=0.5pt,font=\tiny] {trigger + grab} (13.80,9.5);
+\draw[->,dashed] (13.80,10.5) -- node[above,inner sep=0.5pt,font=\tiny] {frame stats} (6.90,10.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,11.5) {decide: set\_exposure};
+\draw[->] (6.90,12.5) -- node[above,inner sep=0.5pt,font=\tiny] {set\_exposure(exposure\_us=15...} (11.50,12.5);
+\draw[->] (11.50,13.5) -- node[above,inner sep=0.5pt,font=\tiny] {ExposureTime} (13.80,13.5);
+\draw[->,dashed] (13.80,14.5) -- node[above,inner sep=0.5pt,font=\tiny] {applied} (6.90,14.5);
+\draw[->] (6.90,15.5) -- node[above,inner sep=0.5pt,font=\tiny] {capture} (11.50,15.5);
+\draw[->] (11.50,16.5) -- node[above,inner sep=0.5pt,font=\tiny] {trigger + grab} (13.80,16.5);
+\draw[->,dashed] (13.80,17.5) -- node[above,inner sep=0.5pt,font=\tiny] {frame stats} (6.90,17.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,18.5) {decide: set\_exposure};
+\draw[->] (6.90,19.5) -- node[above,inner sep=0.5pt,font=\tiny] {set\_exposure(exposure\_us=5000)} (11.50,19.5);
+\draw[->] (11.50,20.5) -- node[above,inner sep=0.5pt,font=\tiny] {ExposureTime} (13.80,20.5);
+\draw[->,dashed] (13.80,21.5) -- node[above,inner sep=0.5pt,font=\tiny] {applied} (6.90,21.5);
+\draw[->] (6.90,22.5) -- node[above,inner sep=0.5pt,font=\tiny] {capture} (11.50,22.5);
+\draw[->] (11.50,23.5) -- node[above,inner sep=0.5pt,font=\tiny] {trigger + grab} (13.80,23.5);
+\draw[->,dashed] (13.80,24.5) -- node[above,inner sep=0.5pt,font=\tiny] {frame stats} (6.90,24.5);
+\node[draw,dotted,fill=gray!8,font=\tiny,minimum width=7.30cm] at (10.35,25.5) {... 4 more steps of the same kind (decide, command, measure): see the table ...};
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,26.5) {decide: finish};
+\draw[->,dashed] (6.90,27.5) -- node[above,inner sep=0.5pt,font=\tiny] {hardware report} (2.30,27.5);
+\draw[->] (2.30,28.5) -- node[above,inner sep=0.5pt,font=\tiny] {3: analysis (coding tool)} (6.90,28.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (6.85,29.5) {coding/focusing tool};
+\draw[->,dashed] (6.90,30.5) -- node[above,inner sep=0.5pt,font=\tiny] {result} (2.30,30.5);
+\draw[->] (2.30,31.5) -- node[above,inner sep=0.5pt,font=\tiny] {final report} (0.00,31.5);
+\end{tikzpicture}\end{center}

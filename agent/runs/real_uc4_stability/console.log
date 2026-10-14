@@ -1,0 +1,207 @@
+USER: At an exposure free of the light flicker, measure how stable the brightness is over two minutes and report the drift.
+
+================== ORCHESTRATOR ==================
+Decision 1/10 -> scientist
+Instruction: Produce a numbered plan to measure brightness stability (drift) over 2 minutes at an exposure free of light flicker (mains flicker: exposure should be an integer multiple of the flicker period, e.g. 10 ms for 50 Hz / 8.33 ms for 60 Hz; say how to verify flicker-free by scanning exposures). Specify: the settings (gain fixed, auto functions off, ROI, no saturation, mean level target), the frame count and interval over 120 s, the metric per frame (mean ROI brightness), and the drift analysis (linear-fit slope per minute, total change in % relative to the mean, std/mean). Say which steps the hardware role does (the camera capture) and which the executor does (the analysis script printing NAME=value lines).
+Reason: A plan with the flicker-free exposure choice and drift analysis is needed before running the camera.
+
+================== SCIENTIST ==================
+# Plan: brightness stability (drift) over 2 minutes at a flicker-free exposure
+
+## 1. Quantity and definition
+- **Quantity:** the temporal drift of the mean ROI brightness B(t) in DN, over T = 120 s.
+- Per frame i at time t_i: B_i = mean of the raw pixel values in a fixed ROI (dark-subtracted if a dark level is measured).
+- **Reported drift:**
+  - slope (DN/min) from a linear fit of B vs t, and slope as % of the mean per minute
+  - total change over 2 min in % = (fitted B(120) − fitted B(0)) / mean(B) × 100
+  - peak-to-peak (max − min)/mean in %
+  - std/mean of B_i (in %), and the std of residuals about the fit (the noise floor)
+
+## 2. Physics and formulas
+- Mains-powered lamps flicker at 2 × f_mains: 100 Hz (50 Hz mains) or 120 Hz (60 Hz mains). The flicker period is 10 ms or 8.33 ms.
+- A flicker-free exposure spans whole periods: t_exp = n/(2 f_mains).
+  - 50 Hz: 10, 20, 30 ms
+  - 60 Hz: 8.33, 16.67, 25 ms
+- Otherwise the frame mean oscillates with the phase of the exposure relative to the flicker. That would be mistaken for drift.
+- Shot-noise floor of the ROI mean: σ_B ≈ sqrt(B_e/N_pix)/K in DN. With N_pix ≈ 10⁴–10⁵ this is far below 0.1 %, so any visible drift is real (source or camera), not photon noise.
+- Fit: B = a + b·t by least squares. Slope uncertainty: σ_b = σ_res / sqrt(Σ(t_i − t̄)²).
+
+## 3. Settings (within camera range and lab limits)
+- **Gain:** fixed (e.g. 0 dB). Auto gain off.
+- **Exposure:** auto exposure off. Auto white balance and any auto functions off. Exposure is fixed at the flicker-free value found in step 2 (default candidate: 10 ms if mains is 50 Hz, the likely case; confirm by the scan, which also reveals 60 Hz).
+- **Pixel format:** mono, 8-bit or the highest bit depth available. Record which.
+- **Black level / gamma / any ISP:** off or fixed at their defaults. Record them.
+- **ROI:** a central block (e.g. 512×512, or about 20 % of the sensor) in the evenly lit area, fixed for all frames. Avoid edges and hot pixels. Alternatively, capture the full frame and apply the ROI in analysis (preferred, since it keeps flexibility).
+- **Level target:** the mean ROI at about 50–70 % of full scale (e.g. ~130–180 DN of 255 for 8-bit). The brightest pixel in the frame must stay below saturation (max < ~95 % of full scale). If the level is too high or low, change the light or the aperture, not the exposure, to keep the flicker-free value.
+- **Trigger:** free-run or software trigger at a fixed interval.
+- **Warm-up:** the camera should be pow
+
+================== ORCHESTRATOR ==================
+Decision 2/10 -> hardware
+Instruction: Execute plan steps 1-2 and 4-5 on the camera. Step 1: turn auto gain, auto exposure and auto white balance off; fix gain (e.g. 0 dB); mono, highest bit depth; report exposure limits, pixel format and the gain used. Step 2: flicker scan: with the scene lit as for the run, capture 20 frames at each exposure from 2 to 30 ms in 1 ms steps, plus 8.33, 16.67 and 25 ms, gain fixed; if saturating, report it. Save the frames with the exposure in each file name and report the folder and file naming. For each exposure, report the ROI mean (central block, about 512x512) per frame, or at least the std/mean across the 20 frames. From this say whether the minima fall at multiples of 10 ms (50 Hz) or 8.33 ms (60 Hz), and choose the flicker-free exposure. Then set that exposure. Check ROI mean is 50-70% of full scale and max pixel is below 95%. Take 20 dark frames with the lens capped. Run 121 frames at 1 s intervals over 120 s with timestamps, exposure and gain unchanged. Then take 20 dark frames again. Report all settings actually applied, the file paths, and the timestamps. Report only what the camera returned.
+Reason: The camera capture (flicker scan and the 2-minute run) must be done before any analysis.
+
+================== INSTRUMENT [start] ==================
+camera_info -> {"vendor": "Hikrobot", "model": "MV-CS028-10UM", "sensor_width": 1936, "sensor_height": 1464, "bit_depth": 12, "max_dn": 4095, "exposure_range_us": [9.0, 9999839.0], "gain_range_db": [0.0, 23.981199264526367], "exposure_us": 10000.0, "gain_db": 0.0, "roi": {"x": 768, "y": 532, "width": 400, "height": 400}, "illumination_control": false, "lab_limits": {"max_exposure_us": 500000, "max_gain_db": 24, "max_frames": 16}}
+
+================== EXECUTOR [decide] ==================
+Hardware step 1: capture 4 frame(s) with the current settings
+Reason: Check level and saturation at the current 10 ms, 0 dB, 400x400 ROI before scanning exposures.
+
+================== INSTRUMENT [measure] ==================
+capture -> 4 frame(s) at 10000 us, 0 dB, ROI 400x400+768+532: mean 2274.07 DN, std 22.59, max 2368, p99.9 2345.0 (0.5726 of full scale), saturated 0 px (0.0); regions {"roi": {"error": "region outside the frame"}}; temporal noise 19.1274 DN rms (var 365.8565, mean 2273.14); file camera/cap001_baseline_10ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 2: set_exposure {"exposure_us": 15000}, then capture 16 frame(s)
+Reason: Start reduced flicker scan (lab max 16 frames, 12-step budget): 15 ms, a non-multiple of 10 ms and 8.33 ms.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 15000} -> ok {"exposure_us": 15000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 15000 us, 0 dB, ROI 400x400+768+532: mean 3362.9 DN, std 28.85, max 3497, p99.9 3452.0 (0.843 of full scale), saturated 0 px (0.0); temporal noise 23.2458 DN rms (var 540.365, mean 3362.129); file camera/cap002_scan_15ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 3: set_exposure {"exposure_us": 5000}, then capture 16 frame(s)
+Reason: Continue reduced scan at 5 ms (half flicker period, worst case for 50 Hz) to compare frame scatter with 10 ms; 15 ms already near 84% full scale so exposures above ~17 ms would saturate.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 5000} -> ok {"exposure_us": 5000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 5000 us, 0 dB, ROI 400x400+768+532: mean 1156.75 DN, std 14.88, max 1221, p99.9 1203.0 (0.2938 of full scale), saturated 0 px (0.0); temporal noise 13.4964 DN rms (var 182.1535, mean 1156.602); file camera/cap003_scan_5ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 4: set_exposure {"exposure_us": 10000}, then capture 16 frame(s)
+Reason: Return to 10 ms (integer multiple of the 50 Hz flicker period, 57% of full scale) as the candidate flicker-free exposure; step budget is limited.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 10000} -> ok {"exposure_us": 10000.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 10000 us, 0 dB, ROI 400x400+768+532: mean 2244.14 DN, std 22.39, max 2359, p99.9 2314.0 (0.5651 of full scale), saturated 0 px (0.0); temporal noise 19.035 DN rms (var 362.3325, mean 2243.992); file camera/cap004_scan_10ms.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 5: capture_series {"n_frames": 121, "interval_s": 1, "label": "drift_10ms"}
+Reason: 10 ms is at 57% of full scale and is a multiple of the 100 Hz flicker period, so start the 120 s stability run now. The step budget is limited.
+
+================== INSTRUMENT [command] ==================
+capture_series {"n_frames": 121, "interval_s": 1, "label": "drift_10ms"} -> ok {"settings": {"exposure_us": 10000.0, "gain_db": 0.0, "roi": {"x": 768, "y": 532, "width": 400, "height": 400}}, "n_frames": 121, "duration_s": 120.014, "summary": {"mean_dn": 2153.35, "rel_std_percent": 1.942, "drift_percent_first_to_last": -6.2205, "slope_percent_per_min": -3.3276, "min_dn": 2085.72, "max_dn": 2229.42}, "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\real_uc4_stability\\work\\camera\\cap005_drift_10ms.npy", "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\real_uc4_stability\\work\\camera\\cap005_drift_10ms.png", "series_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\real_uc4_stability\\work\\camera\\cap005_drift_10ms_series.json"}
+
+================== EXECUTOR [decide] ==================
+Hardware step 6: ask the person: Please cap the lens or block the light completely without moving the camera, then confirm. I will take dark frames at 10 ms and 0 dB.
+Reason: The 120 s run is done; the light is not software-controlled, so a person must block it to take dark frames after the run.
+
+######################################################################
+# GRAPH PAUSED on thread 'real_uc4_stability' (person_action)
+# question: Please cap the lens or block the light completely without moving the camera, then confirm. I will take dark frames at 10 ms and 0 dB.
+######################################################################
+
+Paused. Resume with:  python run_hw3.py --thread real_uc4_stability --reply "<your reply>"
+
+================== HUMAN [person] ==================
+Done: the lens is covered and the light is blocked.
+
+================== EXECUTOR [decide] ==================
+Hardware step 7: capture 16 frame(s) with the current settings
+Reason: Light is blocked; take dark frames at 10 ms, 0 dB (max 16 frames per lab limit).
+
+================== INSTRUMENT [measure] ==================
+capture -> 16 frame(s) at 10000 us, 0 dB, ROI 400x400+768+532: mean 63.4 DN, std 1.12, max 75, p99.9 67.0 (0.0164 of full scale), saturated 0 px (0.0); temporal noise 1.1175 DN rms (var 1.2489, mean 64.101); file camera/cap005_dark_after.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 8: finish: Settings applied: Hikrobot MV-CS028-10UM, 12-bit (max 4095 DN), gain 0 dB, ROI 400x400 at +768+532. The ROI is 400x400, not the 512x512 in the plan. The exposure range is 9 to 9999839 us and the lab limits are 500000 us exposure, 24 dB gain and 16 frames per capture. I did not confirm that auto gain, exposure and white balance are off. No command for that exists, and the camera returned nothing about it. The flicker scan was reduced to 16 frames at 5, 10 and 15 ms because of the 16-frame lab limit and the step budget. Frame std/mean: 5 ms mean 1156.75 DN, std 14.88 (1.29%); 10 ms mean 2244.14 DN, std 22.39 (1.00%); 15 ms mean 3362.9 DN, std 28.85 (0.86%). Within-frame std is not the across-frame scatter, and the camera did not return the across-frame scatter of the ROI mean. The scan therefore did not show where the flicker minima fall, and it did not establish 50 Hz or 60 Hz. I chose 10 ms as the flicker-free exposure by assumption (mains 50 Hz), not from the scan. Brightness check at 10 ms: ROI mean 2274 DN and 2244 DN, which is about 55 to 56% of full scale. The check was 0.5726 and 0.5651 of full scale on the p99.9 values. Max pixel 2368 DN, no saturated pixels. The 120 s run was 121 frames at 1 s intervals, with 10 ms exposure and 0 dB gain. It lasted 120.014 s. Series summary: mean 2153.35 DN, rel_std 1.942%, drift first to last -6.2205%, slope -3.3276 %/min, min 2085.72 DN, max 2229.42 DN. Files: C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc4_stability\work\camera\cap005_drift_10ms.npy (the frame file), the matching .png, and cap005_drift_10ms_series.json (per-frame means and timestamps). Scan files: camera\cap001_baseline_10ms.npy, cap002_scan_15ms.npy, cap003_scan_5ms.npy, cap004_scan_10ms.npy. Dark frames after the run (lens covered): 16 frames, mean 63.4 DN, std 1.12, max 75; file camera\cap005_dark_after.npy. Not done: the full 2 to 30 ms scan, dark frames before the run, and 20-frame sets (the limit is 16). No frames from the middle of the run were reported as saved, only the series json with the per-frame means and the first and last frames.
+Reason: The 120 s run and the post-run dark frames are done. The remaining steps would need the light unblocked again, and the step budget is nearly used.
+
+================== EXECUTOR [report] ==================
+Hardware turn report: Settings applied: Hikrobot MV-CS028-10UM, 12-bit (max 4095 DN), gain 0 dB, ROI 400x400 at +768+532. The ROI is 400x400, not the 512x512 in the plan. The exposure range is 9 to 9999839 us and the lab limits are 500000 us exposure, 24 dB gain and 16 frames per capture. I did not confirm that auto gain, exposure and white balance are off. No command for that exists, and the camera returned nothing about it. The flicker scan was reduced to 16 frames at 5, 10 and 15 ms because of the 16-frame lab limit and the step budget. Frame std/mean: 5 ms mean 1156.75 DN, std 14.88 (1.29%); 10 ms mean 2244.14 DN, std 22.39 (1.00%); 15 ms mean 3362.9 DN, std 28.85 (0.86%). Within-frame std is not the across-frame scatter, and the camera did not return the across-frame scatter of the ROI mean. The scan therefore did not show where the flicker minima fall, and it did not establish 50 Hz or 60 Hz. I chose 10 ms as the flicker-free exposure by assumption (mains 50 Hz), not from the scan. Brightness check at 10 ms: ROI mean 2274 DN and 2244 DN, which is about 55 to 56% of full scale. The check was 0.5726 and 0.5651 of full scale on the p99.9 values. Max pixel 2368 DN, no saturated pixels. The 120 s run was 121 frames at 1 s intervals, with 10 ms exposure and 0 dB gain. It lasted 120.014 s. Series summary: mean 2153.35 DN, rel_std 1.942%, drift first to last -6.2205%, slope -3.3276 %/min, min 2085.72 DN, max 2229.42 DN. Files: C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc4_stability\work\camera\cap005_drift_10ms.npy (the frame file), the matching .png, and cap005_drift_10ms_series.json (per-frame means and timestamps). Scan files: camera\cap001_baseline_10ms.npy, cap002_scan_15ms.npy, cap003_scan_5ms.npy, cap004_scan_10ms.npy. Dark frames after the run (lens covered): 16 frames, mean 63.4 DN, std 1.12, max 75; file camera\cap005_dark_after.npy. Not done: the full 2 to 30 ms scan, dark frames before the run, and 20-frame sets (the limit is 16). No frames from the middle of the run were reported as saved, only the series json with the per-frame means and the first and last frames.
+
+[instrument record]
+commands: 4 (4 applied), captures: 5
+  capture 4 frame(s) at 10000 us, 0 dB, ROI 400x400+768+532: mean 2274.07 DN, std 22.59, max 2368, p99.9 2345.0 (0.5726 of full scale), saturated 0 px (0.0); regions {"roi": {"error": "region outside the frame"}}; temporal noise 19.1274 DN rms (var 365.8565, mean 2273.14); file camera/cap001_baseline_10ms.npy
+  set_
+
+================== ORCHESTRATOR ==================
+Decision 3/10 -> executor
+Instruction: Write one Python script (run with python -I) that analyses the saved files in camera/. (1) Load cap005_drift_10ms_series.json (per-frame ROI means and timestamps) and cap005_drift_10ms.npy. Compute the per-frame ROI mean B_i, and subtract the dark level from cap005_dark_after.npy (mean of its ROI). Least-squares fit B vs t. Print NAME=value lines: N_FRAMES, DARK_AFTER_DN, MEAN_DN, SLOPE_DN_PER_MIN, SLOPE_PCT_PER_MIN, SLOPE_UNCERT_PCT_PER_MIN, TOTAL_CHANGE_PCT (fit-based, 0 to 120 s), FIRST_TO_LAST_PCT, PEAK_TO_PEAK_PCT, STD_OVER_MEAN_PCT, RESIDUAL_STD_PCT, DRIFT_SIGNIFICANT (|slope| > 3 sigma). Also print the mean of the first 10 and last 10 frames and whether the drift is monotonic (e.g. fits to a smooth curve versus a step), and an FFT peak frequency of the residuals, to check for periodic flicker or beat. (2) From cap001, cap002, cap003 and cap004 (the frame stacks), compute the ROI mean per frame and the across-frame std/mean in %, and print the values per exposure as FLICKER_STD_PCT_<exposure>ms. Do not claim 50 or 60 Hz from only three exposures. Print only the computed values.
+Reason: The VERIFIED numbers so far are raw summaries; a script is needed to produce dark-subtracted drift with uncertainty and check residual flicker before reporting.
+
+================== EXECUTOR ==================
+The script ran with exit code 0. It was not run with `python -I` as the orchestrator asked; I ran it as `drift_analysis.py`. It printed the following. It also saved the plot `drift.png`.
+
+**Drift run (121 frames, T_SPAN_S=120.0)**
+- N_FRAMES=121
+- DARK_AFTER_DN=64.101. This is the only dark level; no dark frames were taken before the run.
+- MEAN_DN=2089.249 (dark-subtracted)
+- SLOPE_DN_PER_MIN=-71.6553
+- SLOPE_PCT_PER_MIN=-3.4297
+- SLOPE_UNCERT_PCT_PER_MIN=0.0222
+- TOTAL_CHANGE_PCT=-6.8594 (fit-based, 0 to 120 s)
+- FIRST_TO_LAST_PCT=-6.4046
+- PEAK_TO_PEAK_PCT=6.8781
+- STD_OVER_MEAN_PCT=2.0099
+- RESIDUAL_STD_PCT=0.1423
+- DRIFT_SIGNIFICANT=True
+
+**Shape of the drift**
+- MEAN_FIRST10_DN=2157.835 and MEAN_LAST10_DN=2026.035.
+- THIRD1_MEAN_DN=2136.836, THIRD2_MEAN_DN=2089.066 and THIRD3_MEAN_DN=2040.654.
+- FRACTION_NEGATIVE_STEPS=0.742. After 10-frame smoothing, SMOOTH10_FRACTION_NEGATIVE_STEPS=0.982.
+- QUAD_RESIDUAL_STD_PCT=0.1388, against RESIDUAL_STD_PCT=0.1423 for the linear fit. QUAD_COEF_DN_PER_S2=6.4176e-04.
+- STEP_FIT_RESIDUAL_STD_PCT=1.0229, with STEP_FIT_INDEX=64. A step fits much worse than the linear fit.
+- Together these show a smooth, nearly linear, monotonic decrease, not a step.
+
+**Residual spectrum**
+- FFT_PEAK_FREQ_HZ=0.0165, which is a period of 60.5 s (FFT_PEAK_PERIOD_S).
+- FFT_PEAK_AMP_RATIO_TO_MEDIAN=5.22.
+- FFT_NYQUIST_HZ=0.4959.
+- The peak is at the lowest frequencies, so it is probably slow curvature, not flicker. The 1 s sampling cannot show 100 or 120 Hz flicker, which would alias.
+
+**Across-frame scatter of the ROI mean (flicker check)**
+- FLICKER_STD_PCT_5ms=0.0536 (16 frames)
+- FLICKER_STD_PCT_10ms=0.0787 (16 frames)
+- FLICKER_STD_PCT_10_baselinems=0.0414 (only 4 frames)
+- FLICKER_STD_PCT_15ms=0.1039 (16 frames)
+- All are small, and the 10 ms value is not lower than the 5 ms value. These three exposures do not show where the flicker minima fall, so they do not show whether the mains is 50 or 60 Hz. The 10 ms choice therefore still rests on assumption.
+
+**Summary**
+- The brightness fell about 6.9% over 2 minutes, which is about 3.43% per minute.
+- The slope is significant: 3.4297 against an uncertainty of 0.0222 %/min.
+- The residual scatter is about 0.14%.
+- This drift covers the whole chain: lamp, camera and environment. The camera alone cannot be separated out here.
+- Warm-up was not controlled.
+
+[tool record]
+write drift_analysis.py: ok
+run drift_analysis.py: exit code 0, 0.7 s
+VERIFIED printed by the script: {'N_FRAMES': 121.0,
+
+================== ORCHESTRATOR ==================
+Decision 4/10 -> finish
+Instruction: Final report (numbers from the camera and from drift_analysis.py only).
+
+Setup: Hikrobot MV-CS028-10UM, 12-bit (max 4095 DN), gain 0 dB, exposure 10 ms, ROI 400x400 at +768+532. The run was 121 frames at 1 s intervals over 120 s. At 10 ms the ROI mean was about 2244-2274 DN, roughly 56% of full scale, with no saturated pixels.
+
+Result: brightness drifted down smoothly.
+- The dark-subtracted mean was 2089.249 DN (dark level 64.101 DN, measured after the run only).
+- Slope: -71.66 DN/min, or -3.43 %/min, with an uncertainty of 0.022 %/min. The drift is significant (DRIFT_SIGNIFICANT=True).
+- Fit-based total change over 120 s: -6.86 %. First-to-last change: -6.40 %.
+- Peak-to-peak: 6.88 %. Std/mean: 2.01 %.
+- Residual std about the linear fit: 0.14 %.
+- The mean of the first 10 frames was 2157.8 DN and of the last 10 was 2026.0 DN.
+- The thirds of the run averaged 2136.8, 2089.1 and 2040.7 DN.
+- The decrease is smooth and nearly linear, not a step. A step fit had a residual of 1.02 %, against 0.14 % for the line.
+- The residual FFT peak is at 0.0165 Hz (period about 60 s). It is probably slow curvature, not flicker.
+
+Caveats:
+- The flicker-free exposure was NOT verified. 10 ms was assumed for 50 Hz mains. The lab limit of 16 frames per capture and the step budget allowed only 5, 10 and 15 ms to be scanned.
+- The across-frame std/mean of the ROI mean was 0.054 % at 5 ms, 0.079 % at 10 ms and 0.104 % at 15 ms. Three exposures cannot show where the flicker minima fall, so they cannot establish 50 or 60 Hz.
+- The small residual scatter (0.14 %) suggests flicker is not a major contributor, but this is not proof. 1 s sampling cannot resolve 100 or 120 Hz flicker.
+- I did not confirm that auto gain, auto exposure and auto white balance were off. No command for that exists.
+- No dark frames were taken before the run. The dark level was measured only after it, so dark drift could not be separated out.
+- The camera was not warmed up under control, and 16-frame sets were used instead of 20.
+- The drift is for the whole chain: lamp, camera and environment. It cannot be attributed to the camera alone. The lamp warm-up or sensor warm-up is a likely cause, but this was not tested.
+Reason: A verified script-based drift measurement exists with uncertainty and caveats, so the run can be finished.
+
+Thread finished. VERIFIED: {"tool": "coding_tool", "script": "drift_analysis.py", "results": {"N_FRAMES": 121.0, "T_SPAN_S": 120.0, "DARK_AFTER_DN": 64.101, "MEAN_DN": 2089.249, "SLOPE_DN_PER_MIN": -71.6553, "SLOPE_PCT_PER_MIN": -3.4297, "SLOPE_UNCERT_PCT_PER_MIN": 0.0222, "TOTAL_CHANGE_PCT": -6.8594, "FIRST_TO_LAST_PCT": -6.4046, "PEAK_TO_PEAK_PCT": 6.8781, "STD_OVER_MEAN_PCT": 2.0099, "RESIDUAL_STD_PCT": 0.1423, "MEAN_FIRST10_DN": 2157.835, "MEAN_LAST10_DN": 2026.035, "FRACTION_NEGATIVE_STEPS": 0.742, "QUAD_RESIDUAL_STD_PCT": 0.1388, "QUAD_COEF_DN_PER_S2": 0.00064176, "SMOOTH10_FRACTION_NEGATIVE_STEPS": 0.982, "THIRD1
+Saved in C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\real_uc4_stability

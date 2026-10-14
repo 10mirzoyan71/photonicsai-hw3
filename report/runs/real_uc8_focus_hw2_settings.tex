@@ -1,0 +1,26 @@
+\subsection*{Use case 7 (no camera): focusing prediction at the Homework 2 settings, with the measured camera}
+\textbf{Request:} \emph{Do not use the camera. The lab camera (Hikrobot MV-CS028-10UM) was measured in an earlier run: conversion gain 6.14 e-/DN, read noise 5.78 e-, full well at least 24766 e-. With the focusing tool, compare the focusing enhancement at the Homework 2 settings (macropixel 4, focus\_size 3, bg\_inner 6, bg\_outer 20, bg\_regions 8, iterations 40000, flips 4, remeasure true) for the bench's default camera and for this measured camera, with the bench signal level chosen so that the focus does not saturate this camera. Report both enhancements.}\\
+Camera: not used in this run (simulated bench only); 3 orchestrator decisions, 0 hardware decisions, 0 MCP tool calls.
+\\{\small\textbf{Focusing tool calls:} experiment 1: \{"macropixel": 4, "focus\_size": 3, "bg\_inner": 6, "bg\_outer": 20, "bg\_regions": 8, "iterations": 40000, "flips": 4, "flips\_...; experiment 2: \{"macropixel": 4, "focus\_size": 3, "bg\_inner": 6, "bg\_outer": 20, "bg\_regions": 8, "iterations": 40000, "flips": 4, "flips\_...; experiment 3: \{"macropixel": 4, "focus\_size": 3, "bg\_inner": 6, "bg\_outer": 20, "bg\_regions": 8, "iterations": 40000, "flips": 4, "flips\_...; experiment 4: \{"macropixel": 4, "focus\_size": 3, "bg\_inner": 6, "bg\_outer": 20, "bg\_regions": 8, "iterations": 40000, "flips": 4, "flips\_....}
+\\\textbf{Verified result:} focusing tool (simulated bench), experiment 4: enhancement 30.63.
+\par\smallskip\textbf{Sequence diagram} (as above; long hardware turns shortened).
+\begin{center}\begin{tikzpicture}[x=1cm,y=-0.550cm,font=\scriptsize,>=Stealth]
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (0.00,-1.4) {User};
+\draw[gray!60,dashed] (0.00,-0.4) -- (0.00,8.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (2.30,-1.4) {Orchestrator};
+\draw[gray!60,dashed] (2.30,-0.4) -- (2.30,8.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (4.60,-1.4) {Executor};
+\draw[gray!60,dashed] (4.60,-0.4) -- (4.60,8.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (6.90,-1.4) {MCP server};
+\draw[gray!60,dashed] (6.90,-0.4) -- (6.90,8.5);
+\node[draw,fill=gray!12,rounded corners,minimum width=17mm,align=center] at (9.20,-1.4) {Sim. camera};
+\draw[gray!60,dashed] (9.20,-0.4) -- (9.20,8.5);
+\draw[->] (0.00,0.5) -- node[above,font=\tiny] {request} (2.30,0.5);
+\draw[->] (2.30,1.5) -- node[above,font=\tiny] {1: analysis (coding tool)} (4.60,1.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (4.55,2.5) {coding/focusing tool};
+\draw[->,dashed] (4.60,3.5) -- node[above,font=\tiny] {result} (2.30,3.5);
+\draw[->] (2.30,4.5) -- node[above,font=\tiny] {2: analysis (coding tool)} (4.60,4.5);
+\node[draw,fill=yellow!25,inner sep=0.6pt,font=\tiny,anchor=east] at (4.55,5.5) {coding/focusing tool};
+\draw[->,dashed] (4.60,6.5) -- node[above,font=\tiny] {result} (2.30,6.5);
+\draw[->] (2.30,7.5) -- node[above,font=\tiny] {final report} (0.00,7.5);
+\end{tikzpicture}\end{center}

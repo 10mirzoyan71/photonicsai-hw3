@@ -1,0 +1,72 @@
+USER: Set the camera so that the brightest part of the speckle pattern uses most of the camera's range without saturating, and report the exposure and gain you chose.
+
+================== ORCHESTRATOR ==================
+Decision 1/10 -> hardware
+Instruction: Tune the camera so the brightest part of the speckle pattern uses most of the dynamic range without saturating. Steps: 1) Read current settings (exposure, gain, bit depth, max pixel value). 2) Set gain to its minimum (or lowest sensible) value. 3) Capture a frame, and report the max pixel value and the number of saturated pixels. 4) Adjust exposure iteratively (scale by target/measured max) until the frame max is about 85-95% of the full-scale value (e.g. ~3500-3900 of 4095 for 12-bit, or ~230-243 of 255 for 8-bit) with zero saturated pixels. Only raise gain if the exposure hits its limit. 5) Save the final frame as a .npy file and report the final exposure, gain, max pixel value, saturated pixel count, and full-scale value, using only values the camera returned.
+Reason: The camera must be driven to set exposure and gain and measure the peak pixel value.
+
+================== INSTRUMENT [start] ==================
+camera_info -> {"vendor": "simulation", "model": "SimCam-640 (simulated 12-bit CMOS)", "sensor_width": 640, "sensor_height": 512, "bit_depth": 12, "max_dn": 4095, "exposure_range_us": [20.0, 2000000.0], "gain_range_db": [0.0, 24.0], "exposure_us": 1000.0, "gain_db": 0.0, "roi": {"x": 0, "y": 0, "width": 640, "height": 512}, "illumination_control": true, "lab_limits": {"max_exposure_us": 500000, "max_gain_db": 24, "max_frames": 16}}
+
+================== EXECUTOR [decide] ==================
+Hardware step 1: capture 1 frame(s) with the current settings + analyze_frame
+Reason: Capture a frame at 1000 us and 0 dB to get the max pixel value and saturated count.
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 1000 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 221.98 DN, std 479.49, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 971 px (0.002963); file camera/cap001_initial.npy
+analyze_frame -> {"speckle": {"contrast": 2.16, "mean_above_black_dn": 221.98, "grain_fwhm_x_px": 6.053, "grain_fwhm_y_px": 5.914, "pixels": 327680}, "beam": {"centroid_x_px": 318.77, "centroid_y_px": 255.88, "d4sigma_x_px": 423.09, "d4sigma_y_px": 374.81, "total_dn": 72739580.0}}
+
+================== EXECUTOR [decide] ==================
+Hardware step 2: set_exposure {"exposure_us": 500}, then capture 1 frame(s)
+Reason: Frame is saturated at 1000 us; the true peak is unknown, so cut exposure substantially and re-measure.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 500} -> ok {"exposure_us": 500.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 500 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 133.6 DN, std 259.14, max 4095, p99.9 2738.6 (0.6688 of full scale), saturated 40 px (0.000122); file camera/cap002_exp500.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 3: set_exposure {"exposure_us": 300}, then capture 1 frame(s)
+Reason: Still 40 saturated px at 500 us, so true peak is unknown; cut to 300 us to get an unsaturated peak.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 300} -> ok {"exposure_us": 300.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 300 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 96.63 DN, std 157.73, max 4095, p99.9 1672.0 (0.4083 of full scale), saturated 1 px (3e-06); file camera/cap003_exp300.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 4: set_exposure {"exposure_us": 250}, then capture 1 frame(s)
+Reason: One pixel still saturated at 300 us; reduce exposure to 250 us to get an unsaturated peak.
+
+================== INSTRUMENT [command] ==================
+set_exposure {"exposure_us": 250} -> ok {"exposure_us": 250.0}
+
+================== INSTRUMENT [measure] ==================
+capture -> 1 frame(s) at 250 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 86.54 DN, std 129.63, max 3562, p99.9 1381.3 (0.3373 of full scale), saturated 0 px (0.0); file camera/cap004_exp250.npy
+
+================== EXECUTOR [decide] ==================
+Hardware step 5: finish: Final settings are exposure 250 us and gain 0.0 dB, with illumination 1 and the full 640x512 ROI. The frame max is 3562 DN of the 4095 full scale (12-bit), which is about 87%. Saturated pixels: 0. Mean is 86.54 DN and p99.9 is 1381.3 DN. The final frame is saved as camera/cap004_exp250.npy. Earlier frames saturated: 971 px at 1000 us, 40 px at 500 us and 1 px at 300 us. Gain stayed at its 0 dB minimum because the exposure did not hit a limit.
+Reason: At 250 us and 0 dB the peak is 87% of full scale with no saturated pixels, which meets the target.
+
+================== EXECUTOR [report] ==================
+Hardware turn report: Final settings are exposure 250 us and gain 0.0 dB, with illumination 1 and the full 640x512 ROI. The frame max is 3562 DN of the 4095 full scale (12-bit), which is about 87%. Saturated pixels: 0. Mean is 86.54 DN and p99.9 is 1381.3 DN. The final frame is saved as camera/cap004_exp250.npy. Earlier frames saturated: 971 px at 1000 us, 40 px at 500 us and 1 px at 300 us. Gain stayed at its 0 dB minimum because the exposure did not hit a limit.
+
+[instrument record]
+commands: 3 (3 applied), captures: 4
+  capture 1 frame(s) at 1000 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 221.98 DN, std 479.49, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 971 px (0.002963); file camera/cap001_initial.npy
+  set_exposure {"exposure_us": 500} -> ok
+  capture 1 frame(s) at 500 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 133.6 DN, std 259.14, max 4095, p99.9 2738.6 (0.6688 of full scale), saturated 40 px (0.000122); file camera/cap002_exp500.npy
+  set_exposure {"exposure_us": 300} -> ok
+  capture 1 frame(s) at 300 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 96.63 DN, std 157.73, max 4095, p99.9 1672.0 (0.4083 of full scale), saturated 1 px (3e-06); file camera/cap003_exp300.npy
+  set_exposure {"exposure_us": 250} -> ok
+  capture 1 frame(s) at 250 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 86.54 DN, std 129.63, max 3562, p99.9 1381.3 (0.3373 of full scale), saturated 0 px (0.0); file camera/cap004_exp250.npy
+
+================== ORCHESTRATOR ==================
+Decision 2/10 -> finish
+Instruction: Final camera settings: exposure 250 us, gain 0.0 dB (full 640x512 ROI, illumination 1). The camera returned a frame max of 3562 DN out of 4095 full scale (12-bit), which is 0.8698 of full scale, with 0 saturated pixels. The mean was 86.54 DN and p99.9 was 1381.3 DN. The frame is saved as camera/cap004_exp250.npy. Earlier frames saturated: 971 px at 1000 us, 40 px at 500 us, and 1 px at 300 us. Gain stayed at its 0 dB minimum because exposure did not hit a limit. Note: the speckle is very peaky (p99.9 is only 34% of full scale), so only the very brightest grains reach about 87% of the range.
+Reason: A verified measurement shows 87% of full scale with zero saturated pixels, meeting the goal.
+
+Thread finished. VERIFIED: {"tool": "camera", "settings": {"exposure_us": 250.0, "gain_db": 0.0, "roi": {"x": 0, "y": 0, "width": 640, "height": 512}, "illumination": 1.0}, "stats": {"mean_dn": 86.54, "max_dn": 3562, "p99_9_dn": 1381.3, "saturated_pixels": 0, "saturated_fraction": 0.0, "fraction_of_full_scale": {"mean": 0.0211, "p99_9": 0.3373, "max": 0.8698}}, "temporal_noise": null, "frames": ["cap001_initial.npy", "cap002_exp500.npy", "cap003_exp300.npy", "cap004_exp250.npy"], "analysis": {"speckle": {"contrast": 2.16, "mean_above_black_dn": 221.98, "grain_fwhm_x_px": 6.053, "grain_fwhm_y_px": 5.914, "pixels": 327680
+Saved in C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\uc1_autoexposure

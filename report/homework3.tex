@@ -1,0 +1,288 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,longtable,float,graphicx,enumitem}
+\usepackage[table]{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\lstset{basicstyle=\ttfamily\scriptsize,breaklines=true,columns=fullflexible,frame=single,keepspaces=true}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+% ---- edit before submitting -------------------------------------------------
+\newcommand{\studentname}{Erik Mirzoyan}
+\newcommand{\repourl}{https://github.com/10mirzoyan71/photonicsai-hw3}
+% -----------------------------------------------------------------------------
+\newcommand{\todobox}[1]{\begin{center}\fcolorbox{red}{red!5}{\begin{minipage}{0.92\linewidth}#1\end{minipage}}\end{center}}
+
+\begin{document}
+\begin{center}
+{\Large\bfseries PhotonicsAI --- AI-Driven Science and Autonomous Laboratories}\\[3pt]
+{\large Homework 3: Hardware in the Loop}\\[6pt]
+Name: \studentname\\[2pt]
+Code: \url{\repourl}
+\end{center}
+
+\textbf{Instrument:} one of the lab cameras, a \textbf{Hikrobot MV-CS028-10UM} industrial camera (monochrome, USB~3.0,
+USB3~Vision\,/\,GenICam). \textbf{Interface:} Hikrobot's MVS SDK (the \texttt{MvCameraControl} library, used through the Python
+interface that MVS installs; MVS~5.1.0, camera SDK~4.8.2.2).
+The code: \texttt{camera/} (the connector), \texttt{mcp\_server/} (the MCP server), \texttt{agent/} (the agent system with the
+hardware turn), \texttt{tests/}.
+
+\textbf{Project.} The agent system turns the lab camera into a characterised measuring instrument on its own, from a
+plain-language request: it finds working settings (exposure without saturation, free of the room lights' flicker),
+measures the camera's noise model (conversion gain, read noise, full well, dark level) and its stability, and then puts
+these measured numbers into the camera model of the Homework~2 focusing bench to predict the focusing enhancement that a
+wavefront-shaping experiment would reach with this camera. The lab has no laser for this homework, so the scene is a white
+surface under the room lights; the lab's DMDs with this camera would be the next step towards running the Homework~2
+experiment on real hardware.
+
+%======================================================================
+\section*{(a) The connector}
+%======================================================================
+\texttt{camera/base.py} defines the interface every camera implements: \texttt{info()}, \texttt{set\_exposure(us)},
+\texttt{set\_gain(dB)}, \texttt{set\_roi(x, y, w, h)}, \texttt{grab()} (one frame as a \texttt{uint16} array) and
+\texttt{close()}. \texttt{camera/hikrobot\_camera.py} implements it with the MVS SDK:
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule connector method & MVS SDK call / camera feature (GenICam name)\\ \midrule
+open & \texttt{MV\_CC\_EnumDevices} $\to$ \texttt{MV\_CC\_CreateHandle} $\to$ \texttt{MV\_CC\_OpenDevice} (exclusive)\\
+setup & \texttt{ExposureAuto}=Off, \texttt{GainAuto}=Off, \texttt{ADCBitDepth}=deepest (12 bit), \texttt{BlackLevel}=180,\\
+ & \texttt{PixelFormat}=Mono12 (else Mono10, Mono8), \texttt{TriggerMode}=On, \texttt{TriggerSource}=Software,\\
+ & \texttt{MV\_CC\_StartGrabbing}\\
+\texttt{set\_exposure} / \texttt{set\_gain} & \texttt{ExposureTime} [\textmu s] / \texttt{Gain} [dB] (float features, value read back)\\
+\texttt{set\_roi} & \texttt{OffsetX}, \texttt{OffsetY}, \texttt{Width}, \texttt{Height} (camera increments; acquisition stopped)\\
+\texttt{grab} & \texttt{TriggerSoftware} $\to$ \texttt{MV\_CC\_GetImageBuffer} $\to$ copy $\to$ \texttt{MV\_CC\_FreeImageBuffer}\\
+\texttt{info} & \texttt{WidthMax}, \texttt{HeightMax}, ranges of \texttt{ExposureTime} and \texttt{Gain}, current settings\\
+\bottomrule
+\end{tabular}
+\end{center}
+With the software trigger every frame is exposed after the command that precedes it, with the settings just applied, so
+a measurement can never come from a stale frame. Sensor size, bit depth and ranges are read from the camera, not assumed.
+\texttt{camera/sim\_camera.py} implements the same interface with a simulated 12-bit camera (shot noise, read noise, dark
+current, fixed-pattern noise, saturation, a slowly drifting light source) looking at a laser speckle pattern
+(\texttt{sim}) or at a white surface under room lights that flicker at 100\,Hz (\texttt{sim-room}; a frame integrates the
+flicker from a random phase, so its mean fluctuates unless the exposure spans whole 10\,ms periods). It is used for the
+tests and for the dry runs below; a photon-transfer measurement on it recovers its conversion gain (2.38 vs.\ 2.40
+e$^-$/DN) and read noise (5.97 vs.\ 6.0\,e$^-$), which checks that the analysis the agent uses is sound.
+
+\textbf{Check of the SDK on the laptop (without the camera):} \texttt{tests/check\_mvs\_sdk.py} loads the MVS library and
+checks every function, structure, field and pixel-format code the connector uses: all present (camera SDK 4.8.2.2).
+\textbf{Connection test with the camera plugged in} (\texttt{tests/check\_real\_camera.py}; logs in
+\texttt{tests/real\_camera\_check/}): the connector opened the camera through the SDK and read back the model
+(MV-CS028-10UM, USB3 Vision), the sensor (1936\,$\times$\,1464), the pixel format (Mono12) and the ranges (exposure
+9\,$\mu$s--10\,s, gain 0--24\,dB). Two settings of the camera itself were wrong for measurements, and the test found
+both: the camera digitised with 8 bits (\texttt{ADCBitDepth\_8}), so the Mono12 values came in steps of 17\,DN; and the
+default \texttt{BlackLevel} put the dark level at 0\,DN, which cut off the negative half of the dark noise (half of the
+dark pixels read exactly 0). The connector now selects the deepest ADC mode (\texttt{ADCBitDepth\_12}) and sets
+\texttt{BlackLevel} so that the dark level sits about 60\,DN above zero. With these settings, looking at a white wall at
+0\,dB: mean 819.7\,DN at 2\,ms and 1575.0\,DN at 4\,ms, i.e.\ the signal above the dark level doubles (ratio 2.00);
+42\,frames/s with the software trigger at 4\,ms; a 256\,$\times$\,256 ROI and the return to the full sensor work; with
+the camera covered, the dark level is 62.4\,DN and the temporal noise 0.95\,DN rms.
+
+%======================================================================
+\section*{(b) The MCP server}
+%======================================================================
+\texttt{mcp\_server/camera\_server.py} is an MCP server (Python MCP SDK, \texttt{FastMCP}, stdio transport). It opens the
+camera through the connector (\texttt{CAMERA\_KIND=hikrobot} for the lab camera, \texttt{sim} or \texttt{sim-room} for the
+simulated one) and
+carries out every tool call with it. Each tool is one action of the camera or one reading it returns; the list below is the
+server's own \texttt{list\_tools}:
+{\small\input{mcp_tools.tex}}
+Every tool returns \texttt{ok} and its result, or \texttt{ok=false} and the reason (out of the camera's range, above a
+lab limit, device error), so a refused command reaches the agent instead of crashing the run. The lab limits (maximum
+exposure, gain, frames, series length) are set when the server starts. Every call is appended to \texttt{calls.jsonl}
+(time, tool, arguments, result): this file is the record of what the instrument did, and the tables and sequence diagrams
+in (f) are generated from it. Frames are saved as \texttt{.npy} with a preview \texttt{.png}.
+
+%======================================================================
+\section*{(c) One agent holds the tools}
+%======================================================================
+The roles are those of Homeworks 1 and 2: orchestrator, scientist, general agent, executor, plus the human stop. Only the
+\textbf{executor} receives the MCP server: \texttt{agent/mcp\_bridge.py} starts the server, keeps one MCP session open for
+the whole run (so the camera keeps its settings between calls) and gives the executor the server's tools with the schemas
+the server publishes. No other role can reach the camera.
+The decision to call a tool is a model call: at each step of a hardware turn the executor's model reads the dialogue
+(the request, the scientist's plan, every earlier command and measurement) and returns a structured decision
+\texttt{HWDecision(action, command, command\_args, n\_frames, label, regions, analyze, black\_level\_dn,
+analysis\_region, question, summary, reason)}, where
+\texttt{action} is \emph{command} (one command tool, then a capture), \emph{measure}, \emph{ask\_person} or \emph{finish}.
+The graph then makes exactly that MCP call. The executor also keeps its software tools from the earlier homeworks: the
+coding tool (scripts that analyse the saved frames) and the focusing tool of the Homework~2 simulated bench, whose camera
+model (read noise, full well, signal level, light-source noise) can be set per experiment from the real camera's
+measured numbers.
+
+%======================================================================
+\section*{(d) Hardware in the loop}
+%======================================================================
+The hardware turn is built like the human stop of Homework~2: the orchestrator's decision (a model call) can choose a new
+destination, \texttt{hardware}, when the next step needs the instrument. The graph then gives the turn to the executor in a
+loop of nodes:
+\begin{center}
+\begin{tikzpicture}[>=Stealth, font=\small,
+  n/.style={draw,thick,rounded corners,minimum width=30mm,minimum height=8mm,align=center},
+  e/.style={->,thick}, l/.style={font=\scriptsize,fill=white,inner sep=1pt}]
+  \node[n,fill=blue!8] (o) at (0,0) {orchestrator\\\scriptsize decision = model call};
+  \node[n,fill=red!8] (h) at (-5,-1.6) {human\\\scriptsize interrupt (HW2)};
+  \node[n,fill=orange!15] (s) at (0,-1.6) {\texttt{hw\_start}\\\scriptsize \texttt{camera\_info} via MCP};
+  \node[n,fill=orange!25] (d) at (0,-3.3) {\texttt{hw\_decide}\\\scriptsize executor: model call};
+  \node[n,fill=orange!15] (c) at (-4.4,-5.0) {\texttt{hw\_command}\\\scriptsize MCP command tool};
+  \node[n,fill=orange!15] (m) at (0,-6.7) {\texttt{hw\_measure}\\\scriptsize MCP \texttt{capture} (+ analysis)};
+  \node[n,fill=red!8] (p) at (4.8,-5.0) {\texttt{hw\_person}\\\scriptsize interrupt: person acts};
+  \node[n,fill=orange!15] (r) at (4.6,-1.6) {\texttt{hw\_report}\\\scriptsize executor's report};
+  \draw[e] (o) -- node[l,right]{hardware} (s);
+  \draw[e] (o) -- node[l,above,sloped]{hard decision} (h);
+  \draw[e] (h) -- node[l,below]{accepted} (s);
+  \draw[e] (s) -- (d);
+  \draw[e] (d) -- node[l,above,sloped]{command} (c);
+  \draw[e] (c) -- node[l,below,sloped]{applied} (m);
+  \draw[e] (c.north) to[bend left=25] node[l,left]{refused} (d.west);
+  \draw[e] ([xshift=-5mm]d.south) -- node[l,left]{measure} ([xshift=-5mm]m.north);
+  \draw[e] ([xshift=5mm]m.north) -- node[l,right]{measurement} ([xshift=5mm]d.south);
+  \draw[e] (d) -- node[l,above,sloped]{ask\_person} (p);
+  \draw[e] (p.north) to[bend right=20] (d.north east);
+  \draw[e] (d) -- node[l,above,sloped]{finish / budget} (r);
+  \draw[e] (r) -- (o);
+\end{tikzpicture}
+\end{center}
+Every node writes one turn into the dialogue: the instrument's reply to a command (the value it applied, or why it refused)
+and every measurement (frame statistics, temporal noise, region values, speckle/beam measures, file name). The next
+\texttt{hw\_decide} reads those turns before it chooses again: \emph{decide $\to$ command the hardware $\to$ receive the
+measurement $\to$ decide again}. A refused command goes straight back to \texttt{hw\_decide}. The turn ends when the
+executor chooses \emph{finish} (or after 12 steps); \texttt{hw\_report} then writes the settings and measurements the
+camera returned, marked VERIFIED, and the turn returns to the orchestrator, which may finish only after such a record exists.
+The human stop stays: a hardware turn that changes settings or runs a long acquisition is a hard decision for which the
+orchestrator may ask the person first (accepted $\to$ the turn runs; refused $\to$ it does not, and a record says so), and
+inside the turn \emph{ask\_person} pauses the graph for what only a person can do, e.g.\ block the light for dark frames on
+the lab bench, where the light is not under software control. Both stops are LangGraph interrupts on a checkpointed thread.
+
+%======================================================================
+\section*{(e) Architecture of the system so far}
+%======================================================================
+\begin{center}
+\begin{tikzpicture}[>=Stealth, font=\small,
+  b/.style={draw,thick,rounded corners,minimum width=27mm,minimum height=9mm,align=center},
+  e/.style={->,thick}, l/.style={font=\scriptsize,fill=white,inner sep=1pt}]
+  \node[b,fill=gray!10] (u) at (0,0) {user};
+  \node[b,fill=blue!10] (o) at (5,0) {orchestrator\\\scriptsize next role = model call};
+  \node[b,fill=gray!5,dashed] (st) at (11.3,0) {graph state = dialogue\\\scriptsize LangGraph \texttt{StateGraph}};
+  \node[b,fill=green!10] (sc) at (0.6,-2.3) {scientist\\\scriptsize theory + plan};
+  \node[b,fill=green!10] (g) at (3.9,-2.3) {general\\\scriptsize side questions};
+  \node[b,fill=orange!20,minimum width=31mm] (ex) at (7.6,-2.3) {executor\\\scriptsize holds all tools};
+  \node[b,fill=red!10] (h) at (12.0,-2.3) {human stop\\\scriptsize interrupt + SQLite checkpoint};
+  \node[b,fill=green!5] (ct) at (2.6,-4.6) {coding tool\\\scriptsize scripts on saved frames};
+  \node[b,fill=red!5] (ft) at (6.4,-4.6) {focusing tool\\\scriptsize camera model: measured};
+  \node[b,fill=red!5] (bench) at (5.6,-6.7) {simulated bench (HW2)\\\scriptsize laser, DMD, medium, camera};
+  \node[b,fill=orange!10] (mc) at (10.6,-4.6) {MCP client\\\scriptsize \texttt{mcp\_bridge.py}, one session};
+  \node[b,fill=orange!10] (ms) at (10.6,-6.7) {MCP server\\\scriptsize \texttt{camera\_server.py}, 9 tools};
+  \node[b,fill=orange!10] (cn) at (10.6,-8.6) {connector\\\scriptsize \texttt{camera/base.py} interface};
+  \node[b,fill=orange!10] (hk) at (8.4,-10.5) {Hikrobot connector\\\scriptsize MVS SDK, USB3 Vision};
+  \node[b,fill=orange!10] (sm) at (12.8,-10.5) {simulated camera\\\scriptsize tests, dry runs};
+  \node[b,fill=orange!30] (cam) at (8.4,-12.3) {MV-CS028-10UM camera};
+  \draw[e] (u) -- node[l,above]{request} (o);
+  \draw[e] (o) -- (sc); \draw[e] (o) -- (g);
+  \draw[e,orange!80!black,line width=1.4pt] (o) -- node[l,right,pos=0.55]{hardware turn} (ex);
+  \draw[e] (o) -- node[l,above,sloped]{hard decision} (h);
+  \draw[e,dashed] (ex.east) -- node[above,font=\tiny]{ask person} (h.west);
+  \draw[e] (ex) -- (ct); \draw[e] (ex) -- (ft); \draw[e] (ex) -- node[l,above,sloped]{MCP tools} (mc);
+  \draw[e] (ft) -- (bench);
+  \draw[e] (mc) -- node[l,right]{JSON-RPC (stdio)} (ms);
+  \draw[e] (ms) -- (cn); \draw[e] (cn) -- (hk); \draw[e] (cn) -- (sm);
+  \draw[e] (hk) -- node[l,right]{USB 3.0} (cam);
+  \node[b,fill=gray!5,dashed,minimum width=20mm] (log) at (14.4,-6.7) {\texttt{calls.jsonl}\\\scriptsize every call};
+  \draw[e,dashed] (ms) -- (log);
+  \node[font=\scriptsize,align=left,anchor=north west] at (-0.6,-8.4) {%
+    \textcolor{green!50!black}{\rule{8pt}{8pt}} Homework 1: four roles, coding tool\\
+    \textcolor{red!60}{\rule{8pt}{8pt}} Homework 2: human stop, simulated bench\\
+    \textcolor{orange}{\rule{8pt}{8pt}} Homework 3: hardware turn, MCP, connector, camera};
+\end{tikzpicture}
+\end{center}
+The scientist, the general agent and the human answer the orchestrator, and every specialist turn returns to it; all turns
+are written into the one dialogue that is the graph's state. Sequence diagrams of the runs are in (f), one per run.
+
+%======================================================================
+\section*{(f) Use cases and the demo}
+%======================================================================
+\textbf{Setup at the lab.} The MV-CS028-10UM on the laptop's USB~3 port, without a lens (a sheet of paper over the
+sensor opening diffuses the light), looking at a white wall next to a window under LED room lights; no laser. Every run is
+\texttt{python run\_hw3.py --camera hikrobot --thread <name> --request "..."} (Claude Sonnet~5.5 through the Claude Code
+CLI); the lab limits were 500\,ms exposure, 24\,dB gain and 16 frames per capture. When the agent asked for something
+only a person can do (block or unblock the light) or, with \texttt{--human}, for approval of a hard decision, the person at
+the bench answered and the reply was passed to the run as given (in English). The tables, sequence diagrams and frames
+below are generated from each run's \texttt{calls.jsonl} and transcript by \texttt{agent/render\_hw3.py}.
+
+{\footnotesize\input{runs/real_summary.tex}}
+What the runs found:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+\item \textbf{Auto-exposure:} from a first frame at 4\,ms (peak 1587\,DN) the executor scaled the exposure to 9\,ms and then
+9.4\,ms: peak 3592\,DN (87.7\,\% of full scale), no saturated pixel, gain left at 0\,dB.
+\item \textbf{Flicker:} the LED lights hardly flicker. The frame-to-frame spread of the mean was 0.14\,\% at 1\,ms and
+0.05\,\% at 10\,ms; the agent chose 10\,ms (one 100\,Hz period, 59\,\% of full scale) and stated that the flicker is weak.
+\item \textbf{Stability:} 121 frames over 120\,s at 10\,ms: the brightness fell smoothly by 3.43\,\%/min (6.9\,\% in
+total, residual scatter 0.14\,\%). The agent asked the person to block the light for the dark level (64.1\,DN) and
+did not attribute the drift to the camera; with daylight from the window in the evening, the light itself was changing.
+\item \textbf{Noise model and focusing prediction:} the person blocked and then unblocked the light when asked. From dark
+frames and a photon-transfer series the agent measured a conversion gain of 6.14\,e$^-$/DN, a read noise of 5.78\,e$^-$ and
+a full well of at least 24\,766\,e$^-$ (limited by the 12-bit ADC, so a lower bound). With these numbers as the bench's
+camera and a signal level chosen so that the focus stays at about 66\,\% of the full well, the focusing tool predicted an
+enhancement of 10.8 for the quick configuration the agent chose (64 segments, 6000 iterations). The agent itself noted
+that this value is set by the bench configuration rather than by the camera; for binary-amplitude shaping with 64
+segments the expected enhancement is about $N/2\pi \approx 10$. A follow-up run without the camera (use case~7) therefore
+compared both cameras at the Homework~2 settings (256 segments, 40\,000 iterations, the same signal of 400\,e$^-$/px): the
+bench's default camera gave 33.55 and the measured lab camera 30.63, about 9\,\% lower (at 100\,e$^-$/px: 26.45 and 25.12),
+with no saturated pixel. One run per setting, so the run-to-run spread is not included.
+\item \textbf{Human stops, first attempt:} the person approved the hardware turn. Inside it the agent asked for the light to
+be blocked for dark frames; the person replied without blocking it (having not been told what the dark frames were for).
+The agent did not trust the reply: it checked each ``dark'' set, saw that it was as bright as the wall (2054 vs.\
+2076\,DN), asked again (three requests in all), and finally reported the dark level and read noise as undetermined
+instead of using bright frames; the person approved its decision to finish. \textbf{Second run} (recorded): the orchestrator stopped twice for approval (before the hardware turn
+and before finishing); the person answered \emph{yes} both times; result 4.09\,ms at 12\,dB, wall at 49.6\,\% of full
+scale, temporal noise 35.9\,DN rms.
+\end{itemize}
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.32\linewidth]{runs/img/real_uc1_first_4ms.png}\hfill
+\includegraphics[width=0.32\linewidth]{runs/img/real_uc1_final_9400us.png}\hfill
+\includegraphics[width=0.32\linewidth]{runs/img/real_uc6_dark.png}\\[2pt]
+\includegraphics[width=0.36\linewidth]{runs/img/real_uc4_drift.png}\hfill
+\includegraphics[width=0.62\linewidth]{runs/img/real_uc8_bench_measured_camera.png}
+\caption{What the instrument returned (previews saved by the MCP server, 0--4095\,DN). Top: use case~1, the first frame at
+4\,ms and the frame at the 9.4\,ms the agent chose (the white wall seen through the paper diffuser, brighter towards the
+sides); use case~4, a dark frame taken after the person blocked the light. Bottom left: use case~3, the frame-mean
+brightness over 120\,s and the residuals of the linear fit (the agent's analysis script). Bottom right: use case~7, the
+Homework~2 bench with the measured camera model: speckle at the random start, the focus after 40\,000 iterations, the DMD
+pattern and the search progress (simulation).}
+\end{figure}
+
+\textbf{Demo videos} (screen recordings, cropped to the live camera view and the run's terminal, no sound), in the
+repository folder \texttt{video/} and attached to the email: \texttt{hw3\_demo\_real\_camera.mp4} (59\,s, use case~1: the
+executor decides, calls \texttt{set\_exposure} and \texttt{capture} through MCP, and the camera's frame and statistics come
+back) and \texttt{hw3\_demo\_human\_stop.mp4} (91\,s, use case~6: the graph pauses twice and the person approves).
+
+Three use cases are shown in full below (tool-call table and sequence diagram); the other four follow in compact form
+(request, every tool call with what the instrument did, verified result, a smaller sequence diagram). All seven are in
+the repository with their
+transcripts and \texttt{calls.jsonl}.
+
+\clearpage
+\input{runs/real_uc1_autoexposure.tex}
+\clearpage
+\input{runs/real_uc6_focus_prediction.tex}
+\clearpage
+\input{runs/real_uc7_human_video.tex}
+\clearpage
+\input{runs/real_uc5_flicker.tex}
+\input{runs/real_uc4_stability.tex}
+\input{runs/real_uc7_human.tex}
+\input{runs/real_uc8_focus_hw2_settings.tex}
+
+\subsection*{Dry runs on the simulated camera}
+Before the lab session the same system ran six requests on the simulated camera behind the same MCP server
+(\texttt{--camera sim} or \texttt{sim-room}; runs \texttt{agent/runs/uc1}--\texttt{uc6}). Because the simulated camera's
+true parameters are known, these runs check the method: the agent's photon-transfer measurements gave 2.30 and
+2.41\,e$^-$/DN and 5.66 and 6.04\,e$^-$ read noise (true: 2.40\,e$^-$/DN and 6.0\,e$^-$), and in the room-light scene it
+found the 100\,Hz flicker (22\,\% at 1\,ms, 0.27\,\% at 30\,ms).
+\end{document}

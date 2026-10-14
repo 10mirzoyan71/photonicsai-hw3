@@ -1,0 +1,7 @@
+[
+ {
+  "type": "request",
+  "text": "Measure the camera's read noise (in electrons) and its conversion gain (electrons per DN) with dark frames and a photon-transfer series.",
+  "time": 1791969556.0741174
+ }
+]

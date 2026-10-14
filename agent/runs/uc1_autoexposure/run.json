@@ -1,0 +1,13 @@
+{
+ "thread": "uc1_autoexposure",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "sim",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "request": "Set the camera so that the brightest part of the speckle pattern uses most of the camera's range without saturating, and report the exposure and gain you chose."
+}

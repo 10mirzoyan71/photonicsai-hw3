@@ -1,0 +1,14 @@
+{
+ "thread": "uc2_noise",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "sim",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "Measure the camera's read noise (in electrons) and its conversion gain (electrons per DN) with dark frames and a photon-transfer series."
+}

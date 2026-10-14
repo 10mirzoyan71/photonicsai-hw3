@@ -1,0 +1,21 @@
+[
+ {
+  "type": "request",
+  "text": "At an exposure free of the light flicker, measure how stable the brightness is over two minutes and report the drift.",
+  "time": 1791985174.1547906
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "person_action",
+   "question": "Please cap the lens or block the light completely without moving the camera, then confirm. I will take dark frames at 10 ms and 0 dB.",
+   "proposed_step": null
+  },
+  "time": 1791985373.6562498
+ },
+ {
+  "type": "reply",
+  "text": "Done: the lens is covered and the light is blocked.",
+  "time": 1791985471.597518
+ }
+]

@@ -1,0 +1,14 @@
+{
+ "thread": "uc4_stability",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "sim",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "Check how stable the intensity on the camera is over about one minute, and report the drift."
+}

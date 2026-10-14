@@ -1,0 +1,14 @@
+{
+ "thread": "real_uc6_focus_prediction",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "hikrobot",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "Measure this camera's read noise, conversion gain and full well capacity in electrons. Then use these measured numbers as the camera of the Homework 2 focusing bench and predict the focusing enhancement we can expect with this camera, choosing the bench signal level so that the focus does not saturate it."
+}

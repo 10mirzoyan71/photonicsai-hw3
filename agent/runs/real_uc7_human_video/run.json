@@ -1,0 +1,14 @@
+{
+ "thread": "real_uc7_human_video",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "hikrobot",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": true,
+ "bench": true,
+ "request": "Set the gain to 12 dB and choose the exposure so that the wall is at about half of the camera's range, then report the exposure and the temporal noise."
+}

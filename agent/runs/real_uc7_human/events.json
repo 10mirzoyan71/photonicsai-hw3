@@ -1,0 +1,83 @@
+[
+ {
+  "type": "request",
+  "text": "Set the gain to 12 dB and choose the exposure so that the wall is at about half of the camera's range, then report the exposure and the temporal noise.",
+  "time": 1791986084.1270084
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "hard_decision",
+   "question": "I plan to change the camera settings: set Mono12 if available, turn off auto gain, auto exposure and gamma/LUT, and set gain to 12 dB. Then I'll adjust the exposure until the wall mean is about 50% of full scale (about 2048 DN in Mono12), with no saturated pixels. At that exposure I'll capture 50 dark frames and 100 wall frames, then read back the settings. Shall I proceed?",
+   "proposed_step": {
+    "role": "hardware",
+    "instruction": "Hardware turn. 1) Set pixel format to Mono12 (Mono8 only if Mono12 is unavailable). Disable auto gain, auto exposure, gamma and LUT. Set gain to 12 dB. Read back pixel format, gain, black level, exposure and frame rate. If the gain readback is not 12 dB, report the actual value. 2) Take a trial frame at a short exposure (about 1 ms). Compute the wall ROI mean and the 99.99th-percentile pixel value. Rescale the exposure: T_new = T*(target-black)/(mean-black), with the target at 50% of full scale (2048 DN for Mono12, 128 for Mono8). Prefer a flicker-safe exposure (a multiple of 10 ms or 8.33 ms) if it is in range. 3) Iterate until the ROI mean is 45-55% of full scale. Before each capture, check that the wall max is below about 90% of full scale and that no pixels are at full scale. 4) At the final exposure, wait a few seconds after the last setting change. Capture 50 dark frames (lens capped or light off), then 100 wall frames in one continuous run with no setting changes. Save them losslessly (raw, PNG16 or TIFF16). Read back exposure and gain afterward. Return the file paths, the readbacks, and the ROI mean and max for each iteration."
+   }
+  },
+  "time": 1791986121.6884673
+ },
+ {
+  "type": "reply",
+  "text": "yes",
+  "time": 1791986129.7148936
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "person_action",
+   "question": "Please block the light or cap the lens so the sensor is dark. Don't change any camera settings. Reply when it is blocked.",
+   "proposed_step": null
+  },
+  "time": 1791986150.382131
+ },
+ {
+  "type": "reply",
+  "text": "yes",
+  "time": 1791986165.046688
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "person_action",
+   "question": "The dark frames look almost as bright as the wall (mean 2054 DN vs 2076 DN), so the sensor still seems to be lit. Please fully block the light or cap the lens, then confirm. Don't change any camera settings.",
+   "proposed_step": null
+  },
+  "time": 1791986174.684653
+ },
+ {
+  "type": "reply",
+  "text": "qwer",
+  "time": 1791986185.9146073
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "person_action",
+   "question": "The last two \"dark\" captures were still bright (about 2025\u20132054 DN, versus 2076 DN for the wall), so the sensor is still receiving light. Please fully block the light source or cap the lens, then answer \"blocked\" once it is done. If you can't block it, answer \"cannot\". Please don't change any camera settings.",
+   "proposed_step": null
+  },
+  "time": 1791986197.2475061
+ },
+ {
+  "type": "reply",
+  "text": "change",
+  "time": 1791986218.1280417
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "hard_decision",
+   "question": "The wall measurement is done. At gain 12 dB (readback 11.991 dB) and exposure 3250 us, the wall mean is 2075.86 DN, which is about 50.7% of the 4095 DN full scale. The temporal noise is 36.30 DN rms from a 16-frame set. The lab limit is 16 frames, so the 100 frames in the plan were not possible. No valid dark set was obtained: three attempts gave means of 1996 to 2054 DN, so the light was not blocked. Black level, read noise and flicker are therefore undetermined. Shall I finish and report this, or do you want to block the light and retry the dark frames first?",
+   "proposed_step": {
+    "role": "finish",
+    "instruction": "Final report. Gain requested 12 dB, readback 11.991 dB. Pixel format is 12-bit, max 4095 DN. I could not set or read back black level, pixel format, auto gain/exposure, gamma or LUT, because no command tool exists for them. Final exposure is 3250 us (readback 3250.0), chosen from a 6000 us trial that gave a mean of 3776.93 DN, too bright. Wall ROI 256x256+840+604, 16 frames (the lab maximum; 100 were not allowed): mean 2075.86 DN (about 50.7% of full scale), max 2241, p99.9 2193, 0 saturated pixels. Temporal noise is 36.30 DN rms (var 1317.99 DN^2) for the 16-frame set. The 2-frame check gave 36.36 DN. File: camera/cap003_wall_gain12_exp3250.npy. Caveats: no valid dark set was obtained. The three 16-frame dark attempts had means of 2054.24, 2024.53 and 1996.24 DN, so the light was not blocked. They are not valid dark frames. Black level, read noise, flicker and the mean-variance check are therefore undetermined, and no dark correction was applied. The 36.30 DN is the total temporal noise at about 50% of range."
+   }
+  },
+  "time": 1791986242.7105508
+ },
+ {
+  "type": "reply",
+  "text": "yes",
+  "time": 1791986249.044487
+ }
+]

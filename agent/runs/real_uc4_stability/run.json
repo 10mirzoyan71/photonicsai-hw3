@@ -1,0 +1,14 @@
+{
+ "thread": "real_uc4_stability",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "hikrobot",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "At an exposure free of the light flicker, measure how stable the brightness is over two minutes and report the drift."
+}

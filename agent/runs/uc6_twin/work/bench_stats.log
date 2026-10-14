@@ -1,0 +1,34 @@
+exit_code=0 seconds=0.5
+--- stdout ---
+RUN4_focus_xy=(32,32)
+RUN4_signal_peak_e=2413.1
+RUN4_peak_fraction_FW=0.246
+RUN4_bg_mean_e=86.04
+RUN4_bg_over_readnoise=14.25
+RUN4_brightest_ring_px_e=676.3
+RUN4_brightest_ring_frac_FW=0.069
+RUN4_ring_px=1144_vs_ideal_area=1144_clipped=NO
+RUN5_focus_xy=(32,32)
+RUN5_signal_peak_e=2468.5
+RUN5_peak_fraction_FW=0.252
+RUN5_bg_mean_e=86.75
+RUN5_bg_over_readnoise=14.36
+RUN5_brightest_ring_px_e=517.4
+RUN5_brightest_ring_frac_FW=0.053
+RUN5_ring_px=1144_vs_ideal_area=1144_clipped=NO
+RUN6_focus_xy=(32,33)
+RUN6_signal_peak_e=2729.2
+RUN6_peak_fraction_FW=0.279
+RUN6_bg_mean_e=89.86
+RUN6_bg_over_readnoise=14.88
+RUN6_brightest_ring_px_e=515.9
+RUN6_brightest_ring_frac_FW=0.053
+RUN6_ring_px=1144_vs_ideal_area=1144_clipped=NO
+ENH_mean=28.567
+ENH_std_ddof1=0.603
+ENH_farfield_mean=23.317
+ENH_farfield_std_ddof1=1.323
+REALIZATIONS=3 (not 20)
+IDEAL_CAMERA_VALUE=not reported by tool
+
+--- stderr ---

@@ -1,0 +1,1146 @@
+{
+ "thread": "uc4_stability",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "sim",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "Check how stable the intensity on the camera is over about one minute, and report the drift.",
+ "dialogue": [
+  {
+   "role": "user",
+   "content": "Check how stable the intensity on the camera is over about one minute, and report the drift.",
+   "meta": {}
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 1/10 -> scientist\nInstruction: Produce a concise numbered plan to measure camera intensity stability over ~60 s: fixed exposure/gain, frame rate, number of frames, which frames to save, ROI/mean-intensity metric per frame, how to define drift (e.g., linear-fit slope per minute, relative change first vs last, std/mean), and saturation/dark-reference checks. Keep it executable by the hardware and executor roles.\nReason: A measurement plan is needed before the camera is driven.",
+   "meta": {
+    "decision": {
+     "next_role": "scientist",
+     "instruction": "Produce a concise numbered plan to measure camera intensity stability over ~60 s: fixed exposure/gain, frame rate, number of frames, which frames to save, ROI/mean-intensity metric per frame, how to define drift (e.g., linear-fit slope per minute, relative change first vs last, std/mean), and saturation/dark-reference checks. Keep it executable by the hardware and executor roles.",
+     "reason": "A measurement plan is needed before the camera is driven."
+    },
+    "index": 1,
+    "guard_notes": [],
+    "verified": null,
+    "refused_record": false
+   }
+  },
+  {
+   "role": "scientist",
+   "content": "# Plan: camera intensity stability over ~60 s\n\n## Quantity and definition\nThe quantity is the spatially averaged dark-corrected intensity of a fixed ROI, I(t) in DN, for each frame over about 60 s. Drift is the systematic change of I(t) over the minute. Frame-to-frame noise is treated separately.\n\n## Physics and formulas\n- Per frame: I_k = mean(ROI pixels) \u2212 D, where D is the mean dark level from the dark frames.\n- Temporal noise of the ROI mean is small (about sqrt(var_pixel/N_pix)), so the drift is detectable when it exceeds this level.\n- Linear drift: fit I_k = a + b\u00b7t_k. Report b in DN/s, drift per minute = 60\u00b7b, and relative drift = 60\u00b7b / mean(I) in %/min.\n- Endpoint change: (mean of last 10 frames \u2212 mean of first 10 frames) / mean of first 10 frames.\n- Peak-to-peak range: (max \u2212 min) / mean of the smoothed series.\n- Fluctuation: std(I)/mean(I) after removing the linear trend. Drift is significant if |b| is larger than 3 times its standard error from the fit.\n- Exposure choice: the brightest ROI pixels should reach about 50\u201370% of full scale, with no pixel at the saturation level (255 for 8-bit, 1023 for 10-bit, 4095 for 12-bit; use the pixel format actually set). Stay below saturation so that clipping cannot mask drift.\n\n## Settings\n- Fixed exposure, fixed gain (lowest gain), and auto-exposure, auto-gain and auto-white-balance all off. Pixel format Mono, 12-bit if available, otherwise 8-bit.\n- Exposure: set by a short test so that the ROI peak is at 50\u201370% of full scale. Record the value used. It must stay within the camera's range and the lab limits.\n- Frame rate: fixed at about 5 fps through the frame-rate enable setting, or by software timing. Check the exposure time is shorter than the frame period.\n- Frames: about 300 over about 60 s. This does not have to be exact, but the actual timestamps must be recorded.\n- The light source should be on and warmed up for the usual lab time before the run. Do not touch the setup during the run.\n\n## Numbered steps\n1. [hardware] Connect to the camera. Disable auto-exposure, auto-gain and auto-white-balance, set gain to minimum, set the pixel format, and read back and record all settings, including the sensor temperature if the camera exposes it.\n2. [hardware] Take a short test capture of a few frames with the light on. Check the maximum pixel value and adjust the exposure until the brightest pixel is at 50\u201370% of full scale. Then fix the exposure.\n3. [hardware] Capture 20 dark frames (light blocked or source off, same exposure and gain) and save them as dark_XXX.\n4. [hardware] Capture the main series: about 300 frames at about 5 fps, light on, fixed settings. Save every frame losslessly (PNG or raw/TIFF, not JPEG), with a per-frame timestamp (a timestamps file with the host time and the camera timestamp if available). Name them stab_XXXX.\n5. [hardware] Capture another 20 dark frames at the end, to check whether the dark level itself drifted. Save them as dark_end_XXX.\n6. [analysis] One Python script on the saved frames:\n   - Load the dark frames and compute D_start and D_end (mean DN).\n   - Load the stability frames and define the ROI as a central region (for example 200\u00d7200 px), or the region containing the bright area. Compute I_k, the max pixel in the ROI and the saturated pixel count for each frame.\n   - Fit the linear trend and compute the noise statistics defined above.\n   - Print NAME=value lines: N_FRAMES, DURATION_S, MEAN_DN, DARK_START_DN, DARK_END_DN, DARK_DRIFT_DN, MAX_PIXEL_DN, SATURATED_PIXELS, SLOPE_DN_PER_S, DRIFT_DN_PER_MIN, DRIFT_PERCENT_PER_MIN, SLOPE_SIGMA, ENDPOINT_CHANGE_PERCENT, PTP_PERCENT, STD_DETRENDED_PERCENT.\n7. [analysis] Validity checks in the same script. Print SATURATION_OK (0 saturated pixels), DARK_STABLE_OK (dark drift much smaller than the light drift) and TIMING_OK (the maximum gap between frames is below 2 times the median gap). If any of them fail, report the drift as unreliable and say why.\n8. Report: the drift as %/min with its uncertainty, the endpoint change, the noise level, and whether the drift is significant. Only quote numbers that the script printed.",
+   "meta": {}
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 2/10 -> hardware\nInstruction: Execute plan steps 1-5 with the camera MCP tools. 1) Connect; auto-exposure, auto-gain and auto-white-balance off; gain minimum; Mono, 12-bit if available (else 8-bit); read back and report all settings (and sensor temperature if available). 2) Take a few test frames with the light on; tune exposure so the brightest pixel is at 50-70% of full scale with no saturation; fix it and report the value. 3) Capture 20 dark frames (light blocked, or report if you cannot block it) and save them as dark_XXX. 4) Capture the main series: about 300 frames at about 5 fps (about 60 s), fixed settings, saved losslessly as stab_XXXX, with a timestamps file (host time, plus camera time if available). If the tools limit the frame count or rate, capture as many as allowed over about 60 s and report the actual numbers. 5) Capture 20 more dark frames as dark_end_XXX. Report the file paths, directory, settings, pixel format, max pixel in the test frames and the actual frame count and duration. Do not touch the setup during the run.\nReason: Frames must be acquired from the camera before any analysis can be done.",
+   "meta": {
+    "decision": {
+     "next_role": "hardware",
+     "instruction": "Execute plan steps 1-5 with the camera MCP tools. 1) Connect; auto-exposure, auto-gain and auto-white-balance off; gain minimum; Mono, 12-bit if available (else 8-bit); read back and report all settings (and sensor temperature if available). 2) Take a few test frames with the light on; tune exposure so the brightest pixel is at 50-70% of full scale with no saturation; fix it and report the value. 3) Capture 20 dark frames (light blocked, or report if you cannot block it) and save them as dark_XXX. 4) Capture the main series: about 300 frames at about 5 fps (about 60 s), fixed settings, saved losslessly as stab_XXXX, with a timestamps file (host time, plus camera time if available). If the tools limit the frame count or rate, capture as many as allowed over about 60 s and report the actual numbers. 5) Capture 20 more dark frames as dark_end_XXX. Report the file paths, directory, settings, pixel format, max pixel in the test frames and the actual frame count and duration. Do not touch the setup during the run.",
+     "reason": "Frames must be acquired from the camera before any analysis can be done."
+    },
+    "index": 2,
+    "guard_notes": [],
+    "verified": null,
+    "refused_record": false
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "camera_info -> {\"vendor\": \"simulation\", \"model\": \"SimCam-640 (simulated 12-bit CMOS)\", \"sensor_width\": 640, \"sensor_height\": 512, \"bit_depth\": 12, \"max_dn\": 4095, \"exposure_range_us\": [20.0, 2000000.0], \"gain_range_db\": [0.0, 24.0], \"exposure_us\": 1000.0, \"gain_db\": 0.0, \"roi\": {\"x\": 0, \"y\": 0, \"width\": 640, \"height\": 512}, \"illumination_control\": true, \"lab_limits\": {\"max_exposure_us\": 500000, \"max_gain_db\": 24, \"max_frames\": 16}}",
+   "meta": {
+    "hw": "start",
+    "tool": "camera_info",
+    "result": {
+     "ok": true,
+     "vendor": "simulation",
+     "model": "SimCam-640 (simulated 12-bit CMOS)",
+     "sensor_width": 640,
+     "sensor_height": 512,
+     "bit_depth": 12,
+     "max_dn": 4095,
+     "exposure_range_us": [
+      20.0,
+      2000000.0
+     ],
+     "gain_range_db": [
+      0.0,
+      24.0
+     ],
+     "exposure_us": 1000.0,
+     "gain_db": 0.0,
+     "roi": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 512
+     },
+     "illumination_control": true,
+     "illumination": 1.0,
+     "simulated": true,
+     "lab_limits": {
+      "max_exposure_us": 500000,
+      "max_gain_db": 24,
+      "max_frames": 16
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 1: capture 3 frame(s) with the current settings + analyze_frame\nReason: Test frames at the current settings (gain 0 dB, 1000 \u00b5s) to find the max pixel before tuning exposure.",
+   "meta": {
+    "hw": "decide",
+    "step": 1,
+    "decision": {
+     "action": "measure",
+     "command": "none",
+     "command_args": {},
+     "n_frames": 3,
+     "label": "test_initial",
+     "regions": [],
+     "analyze": true,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Test frames at the current settings (gain 0 dB, 1000 \u00b5s) to find the max pixel before tuning exposure."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 3 frame(s) at 1000 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 220.03 DN, std 475.13, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 928 px (0.002832); temporal noise 9.5137 DN rms (var 90.5101, mean 209.919); file camera/cap001_test_initial.npy\nanalyze_frame -> {\"speckle\": {\"contrast\": 2.1593, \"mean_above_black_dn\": 220.03, \"grain_fwhm_x_px\": 5.99, \"grain_fwhm_y_px\": 5.901, \"pixels\": 327680}, \"beam\": {\"centroid_x_px\": 318.78, \"centroid_y_px\": 255.87, \"d4sigma_x_px\": 423.9, \"d4sigma_y_px\": 375.29, \"total_dn\": 72100179.0}}",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 1000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 1.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 220.03,
+      "std_dn": 475.13,
+      "min_dn": 31,
+      "max_dn": 4095,
+      "p99_9_dn": 4095.0,
+      "saturated_pixels": 928,
+      "saturated_fraction": 0.002832,
+      "fraction_of_full_scale": {
+       "mean": 0.0537,
+       "p99_9": 1.0,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap001_test_initial.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap001_test_initial.png",
+     "n_frames": 3,
+     "temporal_noise": {
+      "pairs": 2,
+      "mean_dn": 209.919,
+      "temporal_var_dn2": 90.5101,
+      "temporal_std_dn": 9.5137,
+      "frame_mean_spread_dn": 1.201
+     }
+    },
+    "analysis": {
+     "ok": true,
+     "speckle": {
+      "contrast": 2.1593,
+      "mean_above_black_dn": 220.03,
+      "grain_fwhm_x_px": 5.99,
+      "grain_fwhm_y_px": 5.901,
+      "pixels": 327680
+     },
+     "beam": {
+      "centroid_x_px": 318.78,
+      "centroid_y_px": 255.87,
+      "d4sigma_x_px": 423.9,
+      "d4sigma_y_px": 375.29,
+      "total_dn": 72100179.0
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 2: set_exposure {\"exposure_us\": 300}, then capture 3 frame(s)\nReason: 928 pixels are saturated at 1000 \u00b5s, so I'm cutting the exposure to find a setting with the peak at 50-70% of full scale.",
+   "meta": {
+    "hw": "decide",
+    "step": 2,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 300
+     },
+     "n_frames": 3,
+     "label": "test_300us",
+     "regions": [],
+     "analyze": true,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "928 pixels are saturated at 1000 \u00b5s, so I'm cutting the exposure to find a setting with the peak at 50-70% of full scale."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 300} -> ok {\"exposure_us\": 300.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 300
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 300.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 3 frame(s) at 300 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 96.16 DN, std 156.46, max 4095, p99.9 1651.6 (0.4033 of full scale), saturated 1 px (3e-06); temporal noise 5.6101 DN rms (var 31.4731, mean 95.765); file camera/cap002_test_300us.npy\nanalyze_frame -> {\"speckle\": {\"contrast\": 1.627, \"mean_above_black_dn\": 96.16, \"grain_fwhm_x_px\": 5.492, \"grain_fwhm_y_px\": 5.443, \"pixels\": 327680}, \"beam\": {\"centroid_x_px\": 318.95, \"centroid_y_px\": 255.79, \"d4sigma_x_px\": 532.58, \"d4sigma_y_px\": 446.91, \"total_dn\": 31511190.0}}",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 300.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 1.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 96.16,
+      "std_dn": 156.46,
+      "min_dn": 30,
+      "max_dn": 4095,
+      "p99_9_dn": 1651.6,
+      "saturated_pixels": 1,
+      "saturated_fraction": 3e-06,
+      "fraction_of_full_scale": {
+       "mean": 0.0235,
+       "p99_9": 0.4033,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap002_test_300us.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap002_test_300us.png",
+     "n_frames": 3,
+     "temporal_noise": {
+      "pairs": 2,
+      "mean_dn": 95.765,
+      "temporal_var_dn2": 31.4731,
+      "temporal_std_dn": 5.6101,
+      "frame_mean_spread_dn": 0.337
+     }
+    },
+    "analysis": {
+     "ok": true,
+     "speckle": {
+      "contrast": 1.627,
+      "mean_above_black_dn": 96.16,
+      "grain_fwhm_x_px": 5.492,
+      "grain_fwhm_y_px": 5.443,
+      "pixels": 327680
+     },
+     "beam": {
+      "centroid_x_px": 318.95,
+      "centroid_y_px": 255.79,
+      "d4sigma_x_px": 532.58,
+      "d4sigma_y_px": 446.91,
+      "total_dn": 31511190.0
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 3: set_exposure {\"exposure_us\": 200}, then capture 3 frame(s)\nReason: One pixel still saturates at 300 \u00b5s, so I'm lowering exposure to 200 \u00b5s to bring the peak below full scale.",
+   "meta": {
+    "hw": "decide",
+    "step": 3,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 200
+     },
+     "n_frames": 3,
+     "label": "test_200us",
+     "regions": [],
+     "analyze": true,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "One pixel still saturates at 300 \u00b5s, so I'm lowering exposure to 200 \u00b5s to bring the peak below full scale."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 200} -> ok {\"exposure_us\": 200.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 200
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 200.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 3 frame(s) at 200 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 76.95 DN, std 102.92, max 2792, p99.9 1098.3 (0.2682 of full scale), saturated 0 px (0.0); temporal noise 5.1363 DN rms (var 26.3813, mean 77.087); file camera/cap003_test_200us.npy\nanalyze_frame -> {\"speckle\": {\"contrast\": 1.3374, \"mean_above_black_dn\": 76.95, \"grain_fwhm_x_px\": 5.483, \"grain_fwhm_y_px\": 5.434, \"pixels\": 327680}, \"beam\": {\"centroid_x_px\": 319.04, \"centroid_y_px\": 255.74, \"d4sigma_x_px\": 574.86, \"d4sigma_y_px\": 475.84, \"total_dn\": 25215121.0}}",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 1.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 76.95,
+      "std_dn": 102.92,
+      "min_dn": 29,
+      "max_dn": 2792,
+      "p99_9_dn": 1098.3,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0188,
+       "p99_9": 0.2682,
+       "max": 0.6818
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap003_test_200us.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap003_test_200us.png",
+     "n_frames": 3,
+     "temporal_noise": {
+      "pairs": 2,
+      "mean_dn": 77.087,
+      "temporal_var_dn2": 26.3813,
+      "temporal_std_dn": 5.1363,
+      "frame_mean_spread_dn": 0.512
+     }
+    },
+    "analysis": {
+     "ok": true,
+     "speckle": {
+      "contrast": 1.3374,
+      "mean_above_black_dn": 76.95,
+      "grain_fwhm_x_px": 5.483,
+      "grain_fwhm_y_px": 5.434,
+      "pixels": 327680
+     },
+     "beam": {
+      "centroid_x_px": 319.04,
+      "centroid_y_px": 255.74,
+      "d4sigma_x_px": 574.86,
+      "d4sigma_y_px": 475.84,
+      "total_dn": 25215121.0
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 4: set_illumination {\"level\": 0}, then capture 16 frame(s)\nReason: Peak 2792 DN (68% of full scale, no saturation) at 200 \u00b5s is fixed; now block the light for dark frames (lab limit is 16 frames per capture).",
+   "meta": {
+    "hw": "decide",
+    "step": 4,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0
+     },
+     "n_frames": 16,
+     "label": "dark_start",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Peak 2792 DN (68% of full scale, no saturation) at 200 \u00b5s is fixed; now block the light for dark frames (lab limit is 16 frames per capture)."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0} -> ok {\"illumination\": 0.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 200 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 39.99 DN, std 2.51, max 52, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5162 DN rms (var 6.3311, mean 40.002); file camera/cap004_dark_start.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 39.99,
+      "std_dn": 2.51,
+      "min_dn": 28,
+      "max_dn": 52,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0127
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap004_dark_start.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap004_dark_start.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.002,
+      "temporal_var_dn2": 6.3311,
+      "temporal_std_dn": 2.5162,
+      "frame_mean_spread_dn": 0.005
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 5: set_illumination {\"level\": 1}, then capture 1 frame(s)\nReason: Dark frames are done (16, the lab limit); turn the light back on before the main series.",
+   "meta": {
+    "hw": "decide",
+    "step": 5,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 1
+     },
+     "n_frames": 1,
+     "label": "light_on",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Dark frames are done (16, the lab limit); turn the light back on before the main series."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 1} -> ok {\"illumination\": 1.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 1
+    },
+    "result": {
+     "ok": true,
+     "illumination": 1.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 200 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 76.79 DN, std 102.49, max 2820, p99.9 1098.6 (0.2683 of full scale), saturated 0 px (0.0); file camera/cap005_light_on.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 1.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 76.79,
+      "std_dn": 102.49,
+      "min_dn": 29,
+      "max_dn": 2820,
+      "p99_9_dn": 1098.6,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0188,
+       "p99_9": 0.2683,
+       "max": 0.6886
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap005_light_on.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap005_light_on.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 6: capture_series {\"n_frames\": 30, \"interval_s\": 2, \"label\": \"stab\"}, then capture 1 frame(s)\nReason: Run the main ~60 s stability series with fixed settings (200 \u00b5s, 0 dB, light on); try 30 frames at 2 s and adapt if the frame limit refuses it.",
+   "meta": {
+    "hw": "decide",
+    "step": 6,
+    "decision": {
+     "action": "command",
+     "command": "capture_series",
+     "command_args": {
+      "n_frames": 30,
+      "interval_s": 2,
+      "label": "stab"
+     },
+     "n_frames": 1,
+     "label": "stab",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Run the main ~60 s stability series with fixed settings (200 \u00b5s, 0 dB, light on); try 30 frames at 2 s and adapt if the frame limit refuses it."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture_series {\"n_frames\": 30, \"interval_s\": 2, \"label\": \"stab\"} -> ok {\"settings\": {\"exposure_us\": 200.0, \"gain_db\": 0.0, \"roi\": {\"x\": 0, \"y\": 0, \"width\": 640, \"height\": 512}, \"illumination\": 1.0}, \"n_frames\": 30, \"duration_s\": 58.025, \"summary\": {\"mean_dn\": 76.916, \"rel_std_percent\": 0.5132, \"drift_percent_first_to_last\": 0.3514, \"slope_percent_per_min\": 0.6461, \"min_dn\": 76.2, \"max_dn\": 77.93}, \"frame_file\": \"C:\\\\Users\\\\erik_\\\\PyCharmMiscProject\\\\hw3\\\\agent\\\\runs\\\\uc4_stability\\\\work\\\\camera\\\\cap006_stab.npy\", \"preview_png\": \"C:\\\\Users\\\\erik_\\\\PyCharmMiscProject\\\\hw3\\\\agent\\\\runs\\\\uc4_stability\\\\work\\\\camera\\\\cap006_stab.png\", \"series_file\": \"C:\\\\Users\\\\erik_\\\\PyCharmMiscProject\\\\hw3\\\\agent\\\\runs\\\\uc4_stability\\\\work\\\\camera\\\\cap006_stab_series.json\"}",
+   "meta": {
+    "hw": "command",
+    "tool": "capture_series",
+    "args": {
+     "n_frames": 30,
+     "interval_s": 2,
+     "label": "stab"
+    },
+    "result": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 1.0
+     },
+     "n_frames": 30,
+     "duration_s": 58.025,
+     "summary": {
+      "mean_dn": 76.916,
+      "rel_std_percent": 0.5132,
+      "drift_percent_first_to_last": 0.3514,
+      "slope_percent_per_min": 0.6461,
+      "min_dn": 76.2,
+      "max_dn": 77.93
+     },
+     "series": {
+      "t_s": [
+       0.022,
+       2.024,
+       4.026,
+       6.026,
+       8.027,
+       10.026,
+       12.024,
+       14.024,
+       16.027,
+       18.026,
+       20.026,
+       22.026,
+       24.026,
+       26.025,
+       28.027,
+       30.025,
+       32.024,
+       34.025,
+       36.025,
+       38.025,
+       40.026,
+       42.024,
+       44.024,
+       46.026,
+       48.026,
+       50.026,
+       52.024,
+       54.027,
+       56.024,
+       58.025
+      ],
+      "mean_dn": [
+       76.84,
+       76.76,
+       76.36,
+       77.12,
+       76.43,
+       76.63,
+       77.01,
+       76.37,
+       77.05,
+       76.2,
+       76.96,
+       77.93,
+       76.71,
+       76.56,
+       76.68,
+       77.57,
+       76.83,
+       77.57,
+       76.74,
+       76.71,
+       76.83,
+       77.02,
+       76.66,
+       77.29,
+       76.71,
+       76.8,
+       77.13,
+       77.37,
+       77.53,
+       77.11
+      ],
+      "max_dn": [
+       2804,
+       2807,
+       2743,
+       2854,
+       2752,
+       2839,
+       2877,
+       2818,
+       2869,
+       2759,
+       2881,
+       2857,
+       2801,
+       2755,
+       2815,
+       2889,
+       2823,
+       2943,
+       2809,
+       2844,
+       2846,
+       2863,
+       2760,
+       2863,
+       2827,
+       2845,
+       2886,
+       2916,
+       2907,
+       2857
+      ],
+      "saturated_pixels": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "region_mean_dn": {}
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap006_stab.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap006_stab.png",
+     "series_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap006_stab_series.json"
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 7: set_illumination {\"level\": 0}, then capture 16 frame(s)\nReason: Main series is done (30 frames, 58 s); block the light to take the end dark frames (16 = lab limit).",
+   "meta": {
+    "hw": "decide",
+    "step": 7,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0
+     },
+     "n_frames": 16,
+     "label": "dark_end",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Main series is done (30 frames, 58 s); block the light to take the end dark frames (16 = lab limit)."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0} -> ok {\"illumination\": 0.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 200 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.0 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5173 DN rms (var 6.337, mean 40.003); file camera/cap007_dark_end.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.0,
+      "std_dn": 2.52,
+      "min_dn": 28,
+      "max_dn": 51,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0125
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap007_dark_end.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\cap007_dark_end.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.003,
+      "temporal_var_dn2": 6.337,
+      "temporal_std_dn": 2.5173,
+      "frame_mean_spread_dn": 0.003
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 8: finish: Camera: SimCam-640 (simulated), 12-bit, max_dn 4095. Settings: exposure 200 us, gain 0 dB, full ROI 640x512. This is a simulated camera, so there were no auto-exposure, auto-gain or white-balance settings to turn off, and no sensor temperature was reported. Test frames: at 1000 us, 928 px saturated (max 4095). At 300 us, 1 px saturated (max 4095). At 200 us, max 2792 DN (p99.9 1098.3), 0 saturated pixels. The peak was 2792/4095, about 68% of full scale. Dark frames: 16 at the start (cap004_dark_start.npy, mean 39.99 DN, temporal noise 2.5162 DN rms) and 16 at the end (cap007_dark_end.npy, mean 40.0 DN, temporal noise 2.5173 DN rms). The lab limit is 16 frames per capture, so I could not take 20. The light was blocked with set_illumination 0. Main series: capture_series gave 30 frames over 58.025 s (2 s interval) at light level 1. The plan asked for about 300 frames at about 5 fps, but I used 30 frames at 2 s because of the lab limit. Series summary: mean 76.916 DN, relative std 0.5132%, first-to-last drift 0.3514%, slope 0.6461 %/min, min 76.2 and max 77.93 DN. Files are in C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\. They are cap006_stab.npy (first and last frames), cap006_stab.png and cap006_stab_series.json (the per-frame mean series). The series was not saved as individual stab_XXXX frames, and there is no separate timestamps file. The series json holds the time series.\nReason: All acquisition steps are done within the lab limits (16 frames per capture), so I'm ending the hardware turn.",
+   "meta": {
+    "hw": "decide",
+    "step": 8,
+    "decision": {
+     "action": "finish",
+     "command": "none",
+     "command_args": {},
+     "n_frames": 1,
+     "label": "",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "Camera: SimCam-640 (simulated), 12-bit, max_dn 4095. Settings: exposure 200 us, gain 0 dB, full ROI 640x512. This is a simulated camera, so there were no auto-exposure, auto-gain or white-balance settings to turn off, and no sensor temperature was reported. Test frames: at 1000 us, 928 px saturated (max 4095). At 300 us, 1 px saturated (max 4095). At 200 us, max 2792 DN (p99.9 1098.3), 0 saturated pixels. The peak was 2792/4095, about 68% of full scale. Dark frames: 16 at the start (cap004_dark_start.npy, mean 39.99 DN, temporal noise 2.5162 DN rms) and 16 at the end (cap007_dark_end.npy, mean 40.0 DN, temporal noise 2.5173 DN rms). The lab limit is 16 frames per capture, so I could not take 20. The light was blocked with set_illumination 0. Main series: capture_series gave 30 frames over 58.025 s (2 s interval) at light level 1. The plan asked for about 300 frames at about 5 fps, but I used 30 frames at 2 s because of the lab limit. Series summary: mean 76.916 DN, relative std 0.5132%, first-to-last drift 0.3514%, slope 0.6461 %/min, min 76.2 and max 77.93 DN. Files are in C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\. They are cap006_stab.npy (first and last frames), cap006_stab.png and cap006_stab_series.json (the per-frame mean series). The series was not saved as individual stab_XXXX frames, and there is no separate timestamps file. The series json holds the time series.",
+     "reason": "All acquisition steps are done within the lab limits (16 frames per capture), so I'm ending the hardware turn."
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware turn report: Camera: SimCam-640 (simulated), 12-bit, max_dn 4095. Settings: exposure 200 us, gain 0 dB, full ROI 640x512. This is a simulated camera, so there were no auto-exposure, auto-gain or white-balance settings to turn off, and no sensor temperature was reported. Test frames: at 1000 us, 928 px saturated (max 4095). At 300 us, 1 px saturated (max 4095). At 200 us, max 2792 DN (p99.9 1098.3), 0 saturated pixels. The peak was 2792/4095, about 68% of full scale. Dark frames: 16 at the start (cap004_dark_start.npy, mean 39.99 DN, temporal noise 2.5162 DN rms) and 16 at the end (cap007_dark_end.npy, mean 40.0 DN, temporal noise 2.5173 DN rms). The lab limit is 16 frames per capture, so I could not take 20. The light was blocked with set_illumination 0. Main series: capture_series gave 30 frames over 58.025 s (2 s interval) at light level 1. The plan asked for about 300 frames at about 5 fps, but I used 30 frames at 2 s because of the lab limit. Series summary: mean 76.916 DN, relative std 0.5132%, first-to-last drift 0.3514%, slope 0.6461 %/min, min 76.2 and max 77.93 DN. Files are in C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\camera\\. They are cap006_stab.npy (first and last frames), cap006_stab.png and cap006_stab_series.json (the per-frame mean series). The series was not saved as individual stab_XXXX frames, and there is no separate timestamps file. The series json holds the time series.\n\n[instrument record]\ncommands: 6 (6 applied), captures: 6\n  capture 3 frame(s) at 1000 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 220.03 DN, std 475.13, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 928 px (0.002832); temporal noise 9.5137 DN rms (var 90.5101, mean 209.919); file camera/cap001_test_initial.npy\n  set_exposure {\"exposure_us\": 300} -> ok\n  capture 3 frame(s) at 300 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 96.16 DN, std 156.46, max 4095, p99.9 1651.6 (0.4033 of full scale), saturated 1 px (3e-06); temporal noise 5.6101 DN rms (var 31.4731, mean 95.765); file camera/cap002_test_300us.npy\n  set_exposure {\"exposure_us\": 200} -> ok\n  capture 3 frame(s) at 200 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 76.95 DN, std 102.92, max 2792, p99.9 1098.3 (0.2682 of full scale), saturated 0 px (0.0); temporal noise 5.1363 DN rms (var 26.3813, mean 77.087); file camera/cap003_test_200us.npy\n  set_illumination {\"level\": 0} -> ok\n  capture 16 frame(s) at 200 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 39.99 DN, std 2.51, max 52, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5162 DN rms (var 6.3311, mean 40.002); file camera/cap004_dark_start.npy\n  set_illumination {\"level\": 1} -> ok\n  capture 1 frame(s) at 200 us, 0 dB, illumination 1, ROI 640x512+0+0: mean 76.79 DN, std 102.49, max 2820, p99.9 1098.6 (0.2683 of full scale), saturated 0 px (0.0); file camera/cap005_light_on.npy\n  capture_series {\"n_frames\": 30, \"interval_s\": 2, \"label\": \"stab\"} -> ok\n  set_illumination {\"level\": 0} -> ok\n  capture 16 frame(s) at 200 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.0 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5173 DN rms (var 6.337, mean 40.003); file camera/cap007_dark_end.npy",
+   "meta": {
+    "hw": "report",
+    "verified": {
+     "tool": "camera",
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "mean_dn": 40.0,
+      "max_dn": 51,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0125
+      }
+     },
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.003,
+      "temporal_var_dn2": 6.337,
+      "temporal_std_dn": 2.5173,
+      "frame_mean_spread_dn": 0.003
+     },
+     "frames": [
+      "cap001_test_initial.npy",
+      "cap002_test_300us.npy",
+      "cap003_test_200us.npy",
+      "cap004_dark_start.npy",
+      "cap005_light_on.npy",
+      "cap007_dark_end.npy"
+     ],
+     "analysis": {
+      "speckle": {
+       "contrast": 1.3374,
+       "mean_above_black_dn": 76.95,
+       "grain_fwhm_x_px": 5.483,
+       "grain_fwhm_y_px": 5.434,
+       "pixels": 327680
+      },
+      "beam": {
+       "centroid_x_px": 319.04,
+       "centroid_y_px": 255.74,
+       "d4sigma_x_px": 574.86,
+       "d4sigma_y_px": 475.84,
+       "total_dn": 25215121.0
+      }
+     },
+     "series": [
+      {
+       "settings": {
+        "exposure_us": 200.0,
+        "gain_db": 0.0,
+        "roi": {
+         "x": 0,
+         "y": 0,
+         "width": 640,
+         "height": 512
+        },
+        "illumination": 1.0
+       },
+       "n_frames": 30,
+       "duration_s": 58.025,
+       "summary": {
+        "mean_dn": 76.916,
+        "rel_std_percent": 0.5132,
+        "drift_percent_first_to_last": 0.3514,
+        "slope_percent_per_min": 0.6461,
+        "min_dn": 76.2,
+        "max_dn": 77.93
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 3/10 -> executor\nInstruction: Write one Python script that reads camera/cap006_stab_series.json (per-frame mean series and times) and the dark files cap004_dark_start.npy and cap007_dark_end.npy. Compute the dark means (DARK_START_DN, DARK_END_DN, DARK_DRIFT_DN). Subtract the dark mean from the series. Fit a linear trend and compute SLOPE_DN_PER_S, its standard error, SLOPE_SIGMA (|slope|/SE), DRIFT_DN_PER_MIN, and DRIFT_PERCENT_PER_MIN relative to the dark-corrected mean. Also compute ENDPOINT_CHANGE_PERCENT (mean of the last 3 frames vs the first 3), PTP_PERCENT, STD_DETRENDED_PERCENT, N_FRAMES, DURATION_S, and the max gap divided by the median gap (TIMING_OK if below 2). Print them all as NAME=value lines. Also print SATURATION_OK from cap006_stab.npy and cap005_light_on.npy.\nReason: The drift needs a dark-corrected fit with an uncertainty and a significance test before the final report.",
+   "meta": {
+    "decision": {
+     "next_role": "executor",
+     "instruction": "Write one Python script that reads camera/cap006_stab_series.json (per-frame mean series and times) and the dark files cap004_dark_start.npy and cap007_dark_end.npy. Compute the dark means (DARK_START_DN, DARK_END_DN, DARK_DRIFT_DN). Subtract the dark mean from the series. Fit a linear trend and compute SLOPE_DN_PER_S, its standard error, SLOPE_SIGMA (|slope|/SE), DRIFT_DN_PER_MIN, and DRIFT_PERCENT_PER_MIN relative to the dark-corrected mean. Also compute ENDPOINT_CHANGE_PERCENT (mean of the last 3 frames vs the first 3), PTP_PERCENT, STD_DETRENDED_PERCENT, N_FRAMES, DURATION_S, and the max gap divided by the median gap (TIMING_OK if below 2). Print them all as NAME=value lines. Also print SATURATION_OK from cap006_stab.npy and cap005_light_on.npy.",
+     "reason": "The drift needs a dark-corrected fit with an uncertainty and a significance test before the final report."
+    },
+    "index": 3,
+    "guard_notes": [],
+    "verified": {
+     "tool": "camera",
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "mean_dn": 40.0,
+      "max_dn": 51,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0125
+      }
+     },
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.003,
+      "temporal_var_dn2": 6.337,
+      "temporal_std_dn": 2.5173,
+      "frame_mean_spread_dn": 0.003
+     },
+     "frames": [
+      "cap001_test_initial.npy",
+      "cap002_test_300us.npy",
+      "cap003_test_200us.npy",
+      "cap004_dark_start.npy",
+      "cap005_light_on.npy",
+      "cap007_dark_end.npy"
+     ],
+     "analysis": {
+      "speckle": {
+       "contrast": 1.3374,
+       "mean_above_black_dn": 76.95,
+       "grain_fwhm_x_px": 5.483,
+       "grain_fwhm_y_px": 5.434,
+       "pixels": 327680
+      },
+      "beam": {
+       "centroid_x_px": 319.04,
+       "centroid_y_px": 255.74,
+       "d4sigma_x_px": 574.86,
+       "d4sigma_y_px": 475.84,
+       "total_dn": 25215121.0
+      }
+     },
+     "series": [
+      {
+       "settings": {
+        "exposure_us": 200.0,
+        "gain_db": 0.0,
+        "roi": {
+         "x": 0,
+         "y": 0,
+         "width": 640,
+         "height": 512
+        },
+        "illumination": 1.0
+       },
+       "n_frames": 30,
+       "duration_s": 58.025,
+       "summary": {
+        "mean_dn": 76.916,
+        "rel_std_percent": 0.5132,
+        "drift_percent_first_to_last": 0.3514,
+        "slope_percent_per_min": 0.6461,
+        "min_dn": 76.2,
+        "max_dn": 77.93
+       }
+      }
+     ]
+    },
+    "refused_record": false
+   }
+  },
+  {
+   "role": "executor",
+   "content": "The script ran with exit code 0. It printed:\n\nDark level\n- DARK_START_DN=40.0018\n- DARK_END_DN=40.0033\n- DARK_DRIFT_DN=0.0015\n\nSeries\n- N_FRAMES=30\n- DURATION_S=58.003\n- MEAN_CORRECTED_DN=36.9134\n\nDrift\n- SLOPE_DN_PER_S=0.008282\n- SLOPE_SE=0.004015\n- SLOPE_SIGMA=2.063\n- DRIFT_DN_PER_MIN=0.4969\n- DRIFT_PERCENT_PER_MIN=1.3462\n- DRIFT_PERCENT_PER_MIN_SE=0.6525\n- ENDPOINT_CHANGE_PERCENT=1.8644 (mean of the last 3 frames against the first 3)\n\nScatter\n- PTP_PERCENT=4.6866\n- STD_DETRENDED_PERCENT=1.0312\n\nChecks\n- MAX_GAP_OVER_MEDIAN=1.002\n- TIMING_OK=1\n- cap006_stab_MAX_DN=2857, SATURATED=0\n- cap005_light_on_MAX_DN=2820, SATURATED=0\n- SATURATION_OK=1\n- DARK_STABLE_OK=1\n\nThe fitted drift is about 1.35 %/min, with a standard error of about 0.65 %/min. That is only about 2.1 sigma, so it is marginal and not clearly significant.\n\nTwo things to keep in mind:\n- **Dark correction:** the earlier summary from the capture tool gave 0.65 %/min. That figure was not dark-corrected, so the larger 1.35 %/min here comes from subtracting the dark level of about 40 DN.\n- **Sample size:** the series has only 30 frames at a 2 s interval, not the 300 frames at 5 fps the plan asked for. The lab limit is 16 frames per capture.\n\n[tool record]\nwrite stab_analysis.py: ok\nrun stab_analysis.py: exit code 0, 0.2 s\nVERIFIED printed by the script: {'DARK_START_DN': 40.0018, 'DARK_END_DN': 40.0033, 'DARK_DRIFT_DN': 0.0015, 'N_FRAMES': 30.0, 'DURATION_S': 58.003, 'MEAN_CORRECTED_DN': 36.9134, 'SLOPE_DN_PER_S': 0.008282, 'SLOPE_SE': 0.004015, 'SLOPE_SIGMA': 2.063, 'DRIFT_DN_PER_MIN': 0.4969, 'DRIFT_PERCENT_PER_MIN': 1.3462, 'DRIFT_PERCENT_PER_MIN_SE': 0.6525, 'ENDPOINT_CHANGE_PERCENT': 1.8644, 'PTP_PERCENT': 4.6866, 'STD_DETRENDED_PERCENT': 1.0312, 'MAX_GAP_OVER_MEDIAN': 1.002, 'TIMING_OK': 1.0, 'SATURATION_OK': 1.0, 'DARK_STABLE_OK': 1.0}",
+   "meta": {
+    "verified": {
+     "tool": "coding_tool",
+     "script": "stab_analysis.py",
+     "results": {
+      "DARK_START_DN": 40.0018,
+      "DARK_END_DN": 40.0033,
+      "DARK_DRIFT_DN": 0.0015,
+      "N_FRAMES": 30.0,
+      "DURATION_S": 58.003,
+      "MEAN_CORRECTED_DN": 36.9134,
+      "SLOPE_DN_PER_S": 0.008282,
+      "SLOPE_SE": 0.004015,
+      "SLOPE_SIGMA": 2.063,
+      "DRIFT_DN_PER_MIN": 0.4969,
+      "DRIFT_PERCENT_PER_MIN": 1.3462,
+      "DRIFT_PERCENT_PER_MIN_SE": 0.6525,
+      "ENDPOINT_CHANGE_PERCENT": 1.8644,
+      "PTP_PERCENT": 4.6866,
+      "STD_DETRENDED_PERCENT": 1.0312,
+      "MAX_GAP_OVER_MEDIAN": 1.002,
+      "TIMING_OK": 1.0,
+      "SATURATION_OK": 1.0,
+      "DARK_STABLE_OK": 1.0
+     }
+    }
+   }
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 4/10 -> finish\nInstruction: Camera intensity stability over about 1 min (SimCam-640, simulated 12-bit; 200 us exposure, 0 dB gain, full ROI 640x512, light on, peak 2792 DN or about 68% of full scale in the test frames, no saturation).\n\nSeries: 30 frames over 58.003 s, with a 2 s interval. The max gap was 1.002 times the median gap, so TIMING_OK=1. Each frame is a frame mean, not an ROI mean.\n\nDark level: start 40.0018 DN, end 40.0033 DN, drift 0.0015 DN. DARK_STABLE_OK=1. The dark-corrected mean intensity is 36.9134 DN.\n\nDrift (linear fit on the dark-corrected series):\n- Slope: 0.008282 DN/s, with a standard error of 0.004015 DN/s. That is 2.06 sigma.\n- Drift: 0.4969 DN/min, which is 1.35 %/min with a standard error of 0.65 %/min.\n- Endpoint change (last 3 frames against first 3): 1.86 %.\n- Peak-to-peak range: 4.69 %.\n- Detrended scatter (std): 1.03 %.\n\nConclusion: the intensity drifts upward by about 1.3 %/min, but this is only about 2 sigma. It is marginal and not clearly significant. The scatter is of the same order as the drift over this minute. The dark level is stable, so the camera offset does not contribute.\n\nCaveats:\n- The capture tool's own summary gave 0.65 %/min. That figure was not dark-corrected, so the dark-corrected 1.35 %/min is the one to use.\n- The lab limit of 16 frames per capture meant I took 30 frames at 2 s, not the planned 300 frames at 5 fps. I also took 16 dark frames at each end, not 20.\n- Saturation check: SATURATION_OK=1.\n- The per-frame series is stored as means in cap006_stab_series.json. Only the first and last frames were saved as images, in cap006_stab.npy.\n- A longer or denser series would be needed to confirm the drift.\n\nFiles: C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\ (camera\\ folder, stab_analysis.py).\nReason: A VERIFIED dark-corrected drift measurement with uncertainty and validity checks exists, so the run can be finished.",
+   "meta": {
+    "decision": {
+     "next_role": "finish",
+     "instruction": "Camera intensity stability over about 1 min (SimCam-640, simulated 12-bit; 200 us exposure, 0 dB gain, full ROI 640x512, light on, peak 2792 DN or about 68% of full scale in the test frames, no saturation).\n\nSeries: 30 frames over 58.003 s, with a 2 s interval. The max gap was 1.002 times the median gap, so TIMING_OK=1. Each frame is a frame mean, not an ROI mean.\n\nDark level: start 40.0018 DN, end 40.0033 DN, drift 0.0015 DN. DARK_STABLE_OK=1. The dark-corrected mean intensity is 36.9134 DN.\n\nDrift (linear fit on the dark-corrected series):\n- Slope: 0.008282 DN/s, with a standard error of 0.004015 DN/s. That is 2.06 sigma.\n- Drift: 0.4969 DN/min, which is 1.35 %/min with a standard error of 0.65 %/min.\n- Endpoint change (last 3 frames against first 3): 1.86 %.\n- Peak-to-peak range: 4.69 %.\n- Detrended scatter (std): 1.03 %.\n\nConclusion: the intensity drifts upward by about 1.3 %/min, but this is only about 2 sigma. It is marginal and not clearly significant. The scatter is of the same order as the drift over this minute. The dark level is stable, so the camera offset does not contribute.\n\nCaveats:\n- The capture tool's own summary gave 0.65 %/min. That figure was not dark-corrected, so the dark-corrected 1.35 %/min is the one to use.\n- The lab limit of 16 frames per capture meant I took 30 frames at 2 s, not the planned 300 frames at 5 fps. I also took 16 dark frames at each end, not 20.\n- Saturation check: SATURATION_OK=1.\n- The per-frame series is stored as means in cap006_stab_series.json. Only the first and last frames were saved as images, in cap006_stab.npy.\n- A longer or denser series would be needed to confirm the drift.\n\nFiles: C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc4_stability\\work\\ (camera\\ folder, stab_analysis.py).",
+     "reason": "A VERIFIED dark-corrected drift measurement with uncertainty and validity checks exists, so the run can be finished."
+    },
+    "index": 4,
+    "guard_notes": [],
+    "verified": {
+     "tool": "coding_tool",
+     "script": "stab_analysis.py",
+     "results": {
+      "DARK_START_DN": 40.0018,
+      "DARK_END_DN": 40.0033,
+      "DARK_DRIFT_DN": 0.0015,
+      "N_FRAMES": 30.0,
+      "DURATION_S": 58.003,
+      "MEAN_CORRECTED_DN": 36.9134,
+      "SLOPE_DN_PER_S": 0.008282,
+      "SLOPE_SE": 0.004015,
+      "SLOPE_SIGMA": 2.063,
+      "DRIFT_DN_PER_MIN": 0.4969,
+      "DRIFT_PERCENT_PER_MIN": 1.3462,
+      "DRIFT_PERCENT_PER_MIN_SE": 0.6525,
+      "ENDPOINT_CHANGE_PERCENT": 1.8644,
+      "PTP_PERCENT": 4.6866,
+      "STD_DETRENDED_PERCENT": 1.0312,
+      "MAX_GAP_OVER_MEDIAN": 1.002,
+      "TIMING_OK": 1.0,
+      "SATURATION_OK": 1.0,
+      "DARK_STABLE_OK": 1.0
+     }
+    },
+    "refused_record": false
+   }
+  }
+ ],
+ "events": [
+  {
+   "type": "request",
+   "text": "Check how stable the intensity on the camera is over about one minute, and report the drift.",
+   "time": 1791969895.9309297
+  }
+ ],
+ "verified": {
+  "tool": "coding_tool",
+  "script": "stab_analysis.py",
+  "results": {
+   "DARK_START_DN": 40.0018,
+   "DARK_END_DN": 40.0033,
+   "DARK_DRIFT_DN": 0.0015,
+   "N_FRAMES": 30.0,
+   "DURATION_S": 58.003,
+   "MEAN_CORRECTED_DN": 36.9134,
+   "SLOPE_DN_PER_S": 0.008282,
+   "SLOPE_SE": 0.004015,
+   "SLOPE_SIGMA": 2.063,
+   "DRIFT_DN_PER_MIN": 0.4969,
+   "DRIFT_PERCENT_PER_MIN": 1.3462,
+   "DRIFT_PERCENT_PER_MIN_SE": 0.6525,
+   "ENDPOINT_CHANGE_PERCENT": 1.8644,
+   "PTP_PERCENT": 4.6866,
+   "STD_DETRENDED_PERCENT": 1.0312,
+   "MAX_GAP_OVER_MEDIAN": 1.002,
+   "TIMING_OK": 1.0,
+   "SATURATION_OK": 1.0,
+   "DARK_STABLE_OK": 1.0
+  }
+ }
+}

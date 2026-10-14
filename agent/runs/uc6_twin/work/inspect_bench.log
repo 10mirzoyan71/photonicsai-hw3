@@ -1,0 +1,19 @@
+exit_code=0 seconds=0.2
+--- stdout ---
+EXP4_KEYS=['camera_start', 'camera_final', 'dmd_pattern', 'trace']
+EXP4_camera_start_shape=(64, 64)_dtype=float64 min=0 max=1989 mean=227.2
+EXP4_camera_final_shape=(64, 64)_dtype=float64 min=0.1224 max=4131 mean=102.1
+EXP4_dmd_pattern_shape=(64, 64)_dtype=uint8 min=0 max=1 mean=0.3125
+EXP4_trace_shape=(30001,)_dtype=float64 min=1.457 max=30.34 mean=26.52
+EXP5_KEYS=['camera_start', 'camera_final', 'dmd_pattern', 'trace']
+EXP5_camera_start_shape=(64, 64)_dtype=float64 min=0 max=2475 mean=227.4
+EXP5_camera_final_shape=(64, 64)_dtype=float64 min=0 max=4094 mean=112.8
+EXP5_dmd_pattern_shape=(64, 64)_dtype=uint8 min=0 max=1 mean=0.3281
+EXP5_trace_shape=(30001,)_dtype=float64 min=0.491 max=30.85 mean=27.3
+EXP6_KEYS=['camera_start', 'camera_final', 'dmd_pattern', 'trace']
+EXP6_camera_start_shape=(64, 64)_dtype=float64 min=0 max=1936 mean=250.5
+EXP6_camera_final_shape=(64, 64)_dtype=float64 min=0 max=4375 mean=115.6
+EXP6_dmd_pattern_shape=(64, 64)_dtype=uint8 min=0 max=1 mean=0.3242
+EXP6_trace_shape=(30001,)_dtype=float64 min=0.8753 max=34.36 mean=30.06
+
+--- stderr ---

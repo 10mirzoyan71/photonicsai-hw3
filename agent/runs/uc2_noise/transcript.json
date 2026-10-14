@@ -1,0 +1,2183 @@
+{
+ "thread": "uc2_noise",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "sim",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "Measure the camera's read noise (in electrons) and its conversion gain (electrons per DN) with dark frames and a photon-transfer series.",
+ "dialogue": [
+  {
+   "role": "user",
+   "content": "Measure the camera's read noise (in electrons) and its conversion gain (electrons per DN) with dark frames and a photon-transfer series.",
+   "meta": {}
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 1/10 -> scientist\nInstruction: Produce a numbered plan to measure read noise (electrons) and conversion gain (e-/DN) for the lab camera using dark frames and a photon-transfer series. Specify: settings to fix (gain, black level, pixel format, exposure ranges), number of dark frames (and shortest exposure), exposure/illumination levels for the series (avoid saturation, ~10-15 levels, pairs of frames per level to subtract fixed pattern), the formulas (variance vs mean slope = gain in DN/e-, K = 1/slope in e-/DN; read noise DN from dark-frame pair difference variance/2, converted by K), and what the hardware turn must capture and save as files. Keep it concise so the hardware role can execute it.\nReason: A plan with settings, frames, and formulas is needed before any camera work.",
+   "meta": {
+    "decision": {
+     "next_role": "scientist",
+     "instruction": "Produce a numbered plan to measure read noise (electrons) and conversion gain (e-/DN) for the lab camera using dark frames and a photon-transfer series. Specify: settings to fix (gain, black level, pixel format, exposure ranges), number of dark frames (and shortest exposure), exposure/illumination levels for the series (avoid saturation, ~10-15 levels, pairs of frames per level to subtract fixed pattern), the formulas (variance vs mean slope = gain in DN/e-, K = 1/slope in e-/DN; read noise DN from dark-frame pair difference variance/2, converted by K), and what the hardware turn must capture and save as files. Keep it concise so the hardware role can execute it.",
+     "reason": "A plan with settings, frames, and formulas is needed before any camera work."
+    },
+    "index": 1,
+    "guard_notes": [],
+    "verified": null,
+    "refused_record": false
+   }
+  },
+  {
+   "role": "scientist",
+   "content": "# Plan: read noise (e-) and conversion gain K (e-/DN)\n\n## Quantities\n- **K** [e-/DN]: conversion gain, K = 1/g, where g [DN/e-] is the slope of the photon-transfer curve.\n- **\u03c3_read** [e-]: temporal read noise, \u03c3_read = K \u00b7 \u03c3_read,DN.\n- Camera ranges (exposure min/max, gain, black level, bit depths) have not been read yet. The hardware turn must report them before any numbers are used.\n\n## Physics\n- Shot noise is Poisson, so variance in e- equals mean signal in e-.\n- In DN: var_DN = g\u00b7(mean_DN \u2212 mean_dark_DN) + \u03c3_read,DN\u00b2, with g = 1/K.\n- Use a frame pair (A, B) at each level. Subtracting the pair removes fixed-pattern noise and the illumination non-uniformity:\n  - var_temporal = var(A\u2212B)/2, over an ROI.\n  - mean = mean((A+B)/2) over the same ROI, minus the dark mean.\n- Fit var_temporal against mean over the linear range (mean from about 5% to 80% of saturation):\n  - slope = g, so K = 1/g.\n  - intercept \u2248 \u03c3_read,DN\u00b2.\n- Read noise from darks is the primary result: \u03c3_read,DN\u00b2 = var(D1\u2212D2)/2, and \u03c3_read = K\u00b7\u03c3_read,DN.\n- The photon-transfer intercept is only a cross-check.\n- If the pixel format is 8-bit, quantization adds 1/12 DN\u00b2 to the variance. State this in the report.\n- Full well (optional) is the mean DN where variance collapses or the response departs from linear. Report it as saturation onset, in DN and in e- (= DN\u00b7K).\n\n## Settings (fixed for all frames)\n- Pixel format: the highest bit depth available (Mono12 preferred, else Mono10, else Mono8).\n- Gain: fixed (0 dB or the minimum).\n- Black level: fixed. Record its value.\n- Gamma, LUT, sharpening, denoise and any other on-camera processing: off.\n- Acquisition: free-run or software trigger, with no auto-exposure and no auto-gain.\n- ROI: full frame or a fixed central region (the analysis uses a central ROI of about 200\u00d7200).\n- Light source: stable, diffuse and uniform, with no lens or a defocused lens.\n- Wait for camera thermal warm-up of about 10 min before capture.\n\n## Frames to capture\n- **Dark set:**\n  - Cover the sensor completely.\n  - Take 50 frames at the shortest allowed exposure.\n  - Take 20 frames at the longest exposure used in the series, as a dark-current check.\n- **Photon-transfer series:**\n  - Constant illumination, with exposure as the variable.\n  - Use 12 exposure levels, spaced roughly geometrically from the shortest exposure up to saturation.\n  - Take 2 consecutive frames (A, B) at each level.\n  - Choose the illumination so that the longest exposure reaches about 95% of full scale.\n  - Add 3\u20134 levels past saturation onset so full well can be located.\n  - Repeat one mid level at the end to check lamp stability. A drift above 1% invalidates the series.\n- Check the brightest region at the first level. Peak DN must stay below 98% of the maximum for every level used in the fit.\n\n## Numbered steps\n1. [hardware] Connect to the camera and read back its ranges (exposure min/max, gain, black level, pixel formats, sensor size). Set the fixed settings above and log all values to `settings.json`.\n2. [hardware] Cover the sensor and capture the dark set: 50 frames at minimum exposure to `dark_short_###.npy`, and 20 frames at the series' longest exposure to `dark_long_###.npy`. Save raw integer arrays, and log exposure and timestamps.\n3. [hardware] Uncover the sensor and set the illumination. Take a test frame to confirm the longest exposure peaks below full scale. Adjust the light or the longest exposure if needed.\n4. [hardware] Capture the series: for each of the 12 exposures (ascending), save `ptc_L##_A.npy` and `ptc_L##_B.npy`. Then add the over-saturation levels and the repeat level. Record exposure and timestamp per file in `series_log.csv`.\n5. [hardware] Report the bit depth, black level, gain, and the file list and folder path.\n6. [analysis] One Python script on the saved frames. It does the following and prints NAME=value lines:\n   - Compute the dark mean and \u03c3_read,DN from dark pairs (D1\u2212D2) and from per-pixel temporal std over the 50 frames. Average over the ROI.\n   - Per level, compute mean (dark-subtracted) and var(A\u2212B)/2 over the ROI.\n   - Exclude levels above 80% of saturation or with saturated pixels. Fit a line to var against mean.\n   - Print the fit results, a linearity residual, and the lamp-drift check.\n   - Print: `K_E_PER_DN`, `GAIN_DN_PER_E`, `READ_NOISE_DN`, `READ_NOISE_E`, `READ_NOISE_E_PTC_INTERCEPT`, `DARK_MEAN_DN`, `DARK_CURRENT_DN_PER_S` (long dark minus short dark, divided by the exposure difference), `FULL_WELL_DN`, `FULL_WELL_E`, `N_LEVELS_FIT`, `LAMP_DRIFT_PCT`.\n   - Save a PTC plot (`ptc.png`).\n7. [analysis] Report only the printed values. If K from the fit and the dark-only read noise are inconsistent (intercept disagrees by more than about 30%), flag it and suspect dark current, a nonlinear response, or a bad level, rather than averaging them.",
+   "meta": {}
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 2/10 -> hardware\nInstruction: Execute plan steps 1-5. 1) Connect, read back and report ranges (exposure min/max, gain, black level, pixel formats, sensor size). Set fixed settings: highest bit depth (Mono12>Mono10>Mono8), minimum gain, fixed black level, all auto/gamma/LUT/sharpen/denoise off, no auto exposure/gain; log to settings.json. 2) With sensor covered: capture 50 dark frames at minimum exposure (dark_short_###.npy) and 20 at the series' longest exposure (dark_long_###.npy), raw integer arrays, log exposure and timestamps. 3) Uncover, set stable uniform illumination, test frame so longest exposure peaks <95% full scale (<98% max). 4) Capture series: 12 exposures ascending, roughly geometric, 2 consecutive frames each: ptc_L##_A.npy / ptc_L##_B.npy; then 3-4 over-saturation levels and a repeat of a mid level at the end; log exposure and timestamp per file in series_log.csv. 5) Report bit depth, black level, gain, folder path, file list, and any measured values the camera returned. If the sensor cannot be covered or illuminated by you, state that clearly and report what was captured.\nReason: Frames must be captured from the camera before analysis can be done.",
+   "meta": {
+    "decision": {
+     "next_role": "hardware",
+     "instruction": "Execute plan steps 1-5. 1) Connect, read back and report ranges (exposure min/max, gain, black level, pixel formats, sensor size). Set fixed settings: highest bit depth (Mono12>Mono10>Mono8), minimum gain, fixed black level, all auto/gamma/LUT/sharpen/denoise off, no auto exposure/gain; log to settings.json. 2) With sensor covered: capture 50 dark frames at minimum exposure (dark_short_###.npy) and 20 at the series' longest exposure (dark_long_###.npy), raw integer arrays, log exposure and timestamps. 3) Uncover, set stable uniform illumination, test frame so longest exposure peaks <95% full scale (<98% max). 4) Capture series: 12 exposures ascending, roughly geometric, 2 consecutive frames each: ptc_L##_A.npy / ptc_L##_B.npy; then 3-4 over-saturation levels and a repeat of a mid level at the end; log exposure and timestamp per file in series_log.csv. 5) Report bit depth, black level, gain, folder path, file list, and any measured values the camera returned. If the sensor cannot be covered or illuminated by you, state that clearly and report what was captured.",
+     "reason": "Frames must be captured from the camera before analysis can be done."
+    },
+    "index": 2,
+    "guard_notes": [],
+    "verified": null,
+    "refused_record": false
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "camera_info -> {\"vendor\": \"simulation\", \"model\": \"SimCam-640 (simulated 12-bit CMOS)\", \"sensor_width\": 640, \"sensor_height\": 512, \"bit_depth\": 12, \"max_dn\": 4095, \"exposure_range_us\": [20.0, 2000000.0], \"gain_range_db\": [0.0, 24.0], \"exposure_us\": 1000.0, \"gain_db\": 0.0, \"roi\": {\"x\": 0, \"y\": 0, \"width\": 640, \"height\": 512}, \"illumination_control\": true, \"lab_limits\": {\"max_exposure_us\": 500000, \"max_gain_db\": 24, \"max_frames\": 16}}",
+   "meta": {
+    "hw": "start",
+    "tool": "camera_info",
+    "result": {
+     "ok": true,
+     "vendor": "simulation",
+     "model": "SimCam-640 (simulated 12-bit CMOS)",
+     "sensor_width": 640,
+     "sensor_height": 512,
+     "bit_depth": 12,
+     "max_dn": 4095,
+     "exposure_range_us": [
+      20.0,
+      2000000.0
+     ],
+     "gain_range_db": [
+      0.0,
+      24.0
+     ],
+     "exposure_us": 1000.0,
+     "gain_db": 0.0,
+     "roi": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 512
+     },
+     "illumination_control": true,
+     "illumination": 1.0,
+     "simulated": true,
+     "lab_limits": {
+      "max_exposure_us": 500000,
+      "max_gain_db": 24,
+      "max_frames": 16
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 1: set_illumination {\"level\": 0}, then capture 1 frame(s)\nReason: Darken the source (software-controlled) to start the dark set.",
+   "meta": {
+    "hw": "decide",
+    "step": 1,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0
+     },
+     "n_frames": 1,
+     "label": "dark_setup",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Darken the source (software-controlled) to start the dark set."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0} -> ok {\"illumination\": 0.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 1000 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.02 DN, std 2.52, max 53, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); file camera/cap001_dark_setup.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 1000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.02,
+      "std_dn": 2.52,
+      "min_dn": 29,
+      "max_dn": 53,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0129
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap001_dark_setup.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap001_dark_setup.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 2: set_exposure {\"exposure_us\": 20}, then capture 16 frame(s)\nReason: Set the minimum exposure and capture the first 16 dark frames, the lab max per capture.",
+   "meta": {
+    "hw": "decide",
+    "step": 2,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 20
+     },
+     "n_frames": 16,
+     "label": "dark_short_a",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Set the minimum exposure and capture the first 16 dark frames, the lab max per capture."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 20} -> ok {\"exposure_us\": 20.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 20
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 20.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 20 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.01 DN, std 2.52, max 53, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5167 DN rms (var 6.3338, mean 40.004); file camera/cap002_dark_short_a.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 20.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.01,
+      "std_dn": 2.52,
+      "min_dn": 27,
+      "max_dn": 53,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0129
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap002_dark_short_a.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap002_dark_short_a.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.004,
+      "temporal_var_dn2": 6.3338,
+      "temporal_std_dn": 2.5167,
+      "frame_mean_spread_dn": 0.003
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 3: set_exposure {\"exposure_us\": 500000}, then capture 16 frame(s)\nReason: Set the longest series exposure (lab max) for the long dark set, still dark.",
+   "meta": {
+    "hw": "decide",
+    "step": 3,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 500000
+     },
+     "n_frames": 16,
+     "label": "dark_long_a",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Set the longest series exposure (lab max) for the long dark set, still dark."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 500000} -> ok {\"exposure_us\": 500000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 500000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 500000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 500000 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 45.99 DN, std 38.78, max 2641, p99.9 55.0 (0.0134 of full scale), saturated 0 px (0.0); temporal noise 2.9755 DN rms (var 8.8536, mean 46.001); file camera/cap003_dark_long_a.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 45.99,
+      "std_dn": 38.78,
+      "min_dn": 32,
+      "max_dn": 2641,
+      "p99_9_dn": 55.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0112,
+       "p99_9": 0.0134,
+       "max": 0.6449
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap003_dark_long_a.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap003_dark_long_a.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 46.001,
+      "temporal_var_dn2": 8.8536,
+      "temporal_std_dn": 2.9755,
+      "frame_mean_spread_dn": 0.004
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 4: set_illumination {\"level\": 0.5}, then capture 1 frame(s)\nReason: Unblock the light to test whether the longest exposure stays below saturation.",
+   "meta": {
+    "hw": "decide",
+    "step": 4,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.5
+     },
+     "n_frames": 1,
+     "label": "test_bright",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Unblock the light to test whether the longest exposure stays below saturation."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.5} -> ok {\"illumination\": 0.5}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.5
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.5
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.5, ROI 640x512+0+0: mean 2422.27 DN, std 1705.93, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 151283 px (0.461679); file camera/cap004_test_bright.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.5
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 2422.27,
+      "std_dn": 1705.93,
+      "min_dn": 221,
+      "max_dn": 4095,
+      "p99_9_dn": 4095.0,
+      "saturated_pixels": 151283,
+      "saturated_fraction": 0.461679,
+      "fraction_of_full_scale": {
+       "mean": 0.5915,
+       "p99_9": 1.0,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap004_test_bright.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap004_test_bright.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 5: set_illumination {\"level\": 0.1}, then capture 1 frame(s)\nReason: At 0.5 illumination 46% of pixels saturate at 500 ms; lower the light to find a level where the longest exposure peaks below 95% of full scale.",
+   "meta": {
+    "hw": "decide",
+    "step": 5,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.1
+     },
+     "n_frames": 1,
+     "label": "test_bright_01",
+     "regions": [],
+     "analyze": true,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "At 0.5 illumination 46% of pixels saturate at 500 ms; lower the light to find a level where the longest exposure peaks below 95% of full scale."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.1} -> ok {\"illumination\": 0.1}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.1
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.1
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.1, ROI 640x512+0+0: mean 1640.91 DN, std 1716.68, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 91505 px (0.279251); file camera/cap005_test_bright_01.npy\nanalyze_frame -> {\"speckle\": {\"contrast\": 1.0462, \"mean_above_black_dn\": 1640.91, \"grain_fwhm_x_px\": 196.485, \"grain_fwhm_y_px\": 212.252, \"pixels\": 327680}, \"beam\": {\"centroid_x_px\": 319.48, \"centroid_y_px\": 255.68, \"d4sigma_x_px\": 463.48, \"d4sigma_y_px\": 445.9, \"total_dn\": 537694992.0}}",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.1
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 1640.91,
+      "std_dn": 1716.68,
+      "min_dn": 70,
+      "max_dn": 4095,
+      "p99_9_dn": 4095.0,
+      "saturated_pixels": 91505,
+      "saturated_fraction": 0.279251,
+      "fraction_of_full_scale": {
+       "mean": 0.4007,
+       "p99_9": 1.0,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap005_test_bright_01.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap005_test_bright_01.png",
+     "n_frames": 1
+    },
+    "analysis": {
+     "ok": true,
+     "speckle": {
+      "contrast": 1.0462,
+      "mean_above_black_dn": 1640.91,
+      "grain_fwhm_x_px": 196.485,
+      "grain_fwhm_y_px": 212.252,
+      "pixels": 327680
+     },
+     "beam": {
+      "centroid_x_px": 319.48,
+      "centroid_y_px": 255.68,
+      "d4sigma_x_px": 463.48,
+      "d4sigma_y_px": 445.9,
+      "total_dn": 537694992.0
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 6: set_illumination {\"level\": 0.02}, then capture 1 frame(s)\nReason: At 0.1 still 28% saturated at 500 ms; lower light further to get the peak below 95% of full scale.",
+   "meta": {
+    "hw": "decide",
+    "step": 6,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.02
+     },
+     "n_frames": 1,
+     "label": "test_bright_02",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "At 0.1 still 28% saturated at 500 ms; lower light further to get the peak below 95% of full scale."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.02} -> ok {\"illumination\": 0.02}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.02
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.02
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.02, ROI 640x512+0+0: mean 935.52 DN, std 1393.99, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 38921 px (0.118777); file camera/cap006_test_bright_02.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.02
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 935.52,
+      "std_dn": 1393.99,
+      "min_dn": 38,
+      "max_dn": 4095,
+      "p99_9_dn": 4095.0,
+      "saturated_pixels": 38921,
+      "saturated_fraction": 0.118777,
+      "fraction_of_full_scale": {
+       "mean": 0.2285,
+       "p99_9": 1.0,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap006_test_bright_02.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap006_test_bright_02.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 7: set_illumination {\"level\": 0.004}, then capture 1 frame(s)\nReason: 12% still saturated at 0.02; lower the light further so the peak at 500 ms falls below 95% of full scale.",
+   "meta": {
+    "hw": "decide",
+    "step": 7,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.004
+     },
+     "n_frames": 1,
+     "label": "test_bright_03",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "12% still saturated at 0.02; lower the light further so the peak at 500 ms falls below 95% of full scale."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.004} -> ok {\"illumination\": 0.004}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.004
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.004
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.004, ROI 640x512+0+0: mean 379.26 DN, std 771.74, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 5538 px (0.016901); file camera/cap007_test_bright_03.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.004
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 379.26,
+      "std_dn": 771.74,
+      "min_dn": 34,
+      "max_dn": 4095,
+      "p99_9_dn": 4095.0,
+      "saturated_pixels": 5538,
+      "saturated_fraction": 0.016901,
+      "fraction_of_full_scale": {
+       "mean": 0.0926,
+       "p99_9": 1.0,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap007_test_bright_03.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap007_test_bright_03.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 8: set_illumination {\"level\": 0.002}, then capture 1 frame(s)\nReason: 1.7% of pixels still saturate at 0.004; halve the light to bring the peak below 95% of full scale at 500 ms.",
+   "meta": {
+    "hw": "decide",
+    "step": 8,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.002
+     },
+     "n_frames": 1,
+     "label": "test_bright_04",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "1.7% of pixels still saturate at 0.004; halve the light to bring the peak below 95% of full scale at 500 ms."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.002} -> ok {\"illumination\": 0.002}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.002
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.002
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.002, ROI 640x512+0+0: mean 228.37 DN, std 481.9, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 981 px (0.002994); file camera/cap008_test_bright_04.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.002
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 228.37,
+      "std_dn": 481.9,
+      "min_dn": 34,
+      "max_dn": 4095,
+      "p99_9_dn": 4095.0,
+      "saturated_pixels": 981,
+      "saturated_fraction": 0.002994,
+      "fraction_of_full_scale": {
+       "mean": 0.0558,
+       "p99_9": 1.0,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap008_test_bright_04.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap008_test_bright_04.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 9: set_illumination {\"level\": 0.0007}, then capture 1 frame(s)\nReason: 0.3% still saturated at 0.002; reduce light about 3x so the beam peak at 500 ms falls below 95% of full scale.",
+   "meta": {
+    "hw": "decide",
+    "step": 9,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.0007
+     },
+     "n_frames": 1,
+     "label": "",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "0.3% still saturated at 0.002; reduce light about 3x so the beam peak at 500 ms falls below 95% of full scale."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.0007} -> ok {\"illumination\": 0.0007}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.0007
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.0007
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.0007, ROI 640x512+0+0: mean 109.64 DN, std 181.27, max 4095, p99.9 1976.3 (0.4826 of full scale), saturated 6 px (1.8e-05); file camera/cap009.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0007
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 109.64,
+      "std_dn": 181.27,
+      "min_dn": 33,
+      "max_dn": 4095,
+      "p99_9_dn": 1976.3,
+      "saturated_pixels": 6,
+      "saturated_fraction": 1.8e-05,
+      "fraction_of_full_scale": {
+       "mean": 0.0268,
+       "p99_9": 0.4826,
+       "max": 1.0
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap009.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap009.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 10: finish: Partial result: only the dark sets and the illumination search were done. The photon-transfer series (12 levels, A/B pairs, over-saturation levels, repeat level) was NOT captured. series_log.csv and settings.json were not written, and there are no ptc_L##_A/B files.\n\nCamera (simulated SimCam-640): 640x512, 12-bit (max 4095 DN), exposure range 20 to 2,000,000 us, gain range 0 to 24 dB. Lab limits: exposure up to 500,000 us, 16 frames per capture. I did not read back or set a black level, and I did not set any pixel-format or processing options. Gain was 0 dB, as returned by camera_info.\n\nCaptured (in the camera/ folder, 16 frames per capture because of the lab limit):\n- Dark short, 20 us, 16 frames (cap002_dark_short_a.npy): mean 40.01 DN, temporal noise 2.5167 DN rms (var 6.3338). Only 16 of the 50 requested frames were taken.\n- Dark long, 500,000 us, 16 frames (cap003_dark_long_a.npy): mean 45.99 DN, temporal noise 2.9755 DN rms (var 8.8536), max 2641 DN. Only 16 of the 20 requested frames were taken. The frame std of 38.78 and max of 2641 DN suggest some hot pixels or strong dark current.\n- Single dark frame at 1000 us: cap001_dark_setup.npy, mean 40.02 DN.\n\nIllumination search at 500,000 us (single frames, cap004 to cap009). The beam is non-uniform (Gaussian-like, centroid about 319, 256 px). The saturated-pixel fraction fell with the light level:\n\n| Illumination | Mean (DN) | Saturated pixels |\n|---|---|---|\n| 0.5 | 2422 | 46.2% |\n| 0.1 | 1641 | 27.9% |\n| 0.02 | 935 | 11.9% |\n| 0.004 | 379 | 1.7% |\n| 0.002 | 228 | 0.30% |\n| 0.0007 | 109.64 | 6 px |\n\nAt 0.0007 the max is still 4095 DN, but p99.9 is 1976 DN (0.48 of full scale). The peak is still not below 95% of full scale. A level near 0.0005, or a central ROI of about 200x200, would be needed.\n\nRead-noise estimate: not computed. The dark temporal variance of 6.33 DN\u00b2 (short dark) is a per-pixel temporal variance and is only a rough guide. The conversion gain K has no value yet, because the photon-transfer slope is missing. The illumination is currently 0.0007 and the exposure is 500,000 us.\nReason: The 12-step budget is nearly used up, so the full photon-transfer series cannot be captured. I'm reporting what was captured.",
+   "meta": {
+    "hw": "decide",
+    "step": 10,
+    "decision": {
+     "action": "finish",
+     "command": "none",
+     "command_args": {},
+     "n_frames": 1,
+     "label": "",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "Partial result: only the dark sets and the illumination search were done. The photon-transfer series (12 levels, A/B pairs, over-saturation levels, repeat level) was NOT captured. series_log.csv and settings.json were not written, and there are no ptc_L##_A/B files.\n\nCamera (simulated SimCam-640): 640x512, 12-bit (max 4095 DN), exposure range 20 to 2,000,000 us, gain range 0 to 24 dB. Lab limits: exposure up to 500,000 us, 16 frames per capture. I did not read back or set a black level, and I did not set any pixel-format or processing options. Gain was 0 dB, as returned by camera_info.\n\nCaptured (in the camera/ folder, 16 frames per capture because of the lab limit):\n- Dark short, 20 us, 16 frames (cap002_dark_short_a.npy): mean 40.01 DN, temporal noise 2.5167 DN rms (var 6.3338). Only 16 of the 50 requested frames were taken.\n- Dark long, 500,000 us, 16 frames (cap003_dark_long_a.npy): mean 45.99 DN, temporal noise 2.9755 DN rms (var 8.8536), max 2641 DN. Only 16 of the 20 requested frames were taken. The frame std of 38.78 and max of 2641 DN suggest some hot pixels or strong dark current.\n- Single dark frame at 1000 us: cap001_dark_setup.npy, mean 40.02 DN.\n\nIllumination search at 500,000 us (single frames, cap004 to cap009). The beam is non-uniform (Gaussian-like, centroid about 319, 256 px). The saturated-pixel fraction fell with the light level:\n\n| Illumination | Mean (DN) | Saturated pixels |\n|---|---|---|\n| 0.5 | 2422 | 46.2% |\n| 0.1 | 1641 | 27.9% |\n| 0.02 | 935 | 11.9% |\n| 0.004 | 379 | 1.7% |\n| 0.002 | 228 | 0.30% |\n| 0.0007 | 109.64 | 6 px |\n\nAt 0.0007 the max is still 4095 DN, but p99.9 is 1976 DN (0.48 of full scale). The peak is still not below 95% of full scale. A level near 0.0005, or a central ROI of about 200x200, would be needed.\n\nRead-noise estimate: not computed. The dark temporal variance of 6.33 DN\u00b2 (short dark) is a per-pixel temporal variance and is only a rough guide. The conversion gain K has no value yet, because the photon-transfer slope is missing. The illumination is currently 0.0007 and the exposure is 500,000 us.",
+     "reason": "The 12-step budget is nearly used up, so the full photon-transfer series cannot be captured. I'm reporting what was captured."
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware turn report: Partial result: only the dark sets and the illumination search were done. The photon-transfer series (12 levels, A/B pairs, over-saturation levels, repeat level) was NOT captured. series_log.csv and settings.json were not written, and there are no ptc_L##_A/B files.\n\nCamera (simulated SimCam-640): 640x512, 12-bit (max 4095 DN), exposure range 20 to 2,000,000 us, gain range 0 to 24 dB. Lab limits: exposure up to 500,000 us, 16 frames per capture. I did not read back or set a black level, and I did not set any pixel-format or processing options. Gain was 0 dB, as returned by camera_info.\n\nCaptured (in the camera/ folder, 16 frames per capture because of the lab limit):\n- Dark short, 20 us, 16 frames (cap002_dark_short_a.npy): mean 40.01 DN, temporal noise 2.5167 DN rms (var 6.3338). Only 16 of the 50 requested frames were taken.\n- Dark long, 500,000 us, 16 frames (cap003_dark_long_a.npy): mean 45.99 DN, temporal noise 2.9755 DN rms (var 8.8536), max 2641 DN. Only 16 of the 20 requested frames were taken. The frame std of 38.78 and max of 2641 DN suggest some hot pixels or strong dark current.\n- Single dark frame at 1000 us: cap001_dark_setup.npy, mean 40.02 DN.\n\nIllumination search at 500,000 us (single frames, cap004 to cap009). The beam is non-uniform (Gaussian-like, centroid about 319, 256 px). The saturated-pixel fraction fell with the light level:\n\n| Illumination | Mean (DN) | Saturated pixels |\n|---|---|---|\n| 0.5 | 2422 | 46.2% |\n| 0.1 | 1641 | 27.9% |\n| 0.02 | 935 | 11.9% |\n| 0.004 | 379 | 1.7% |\n| 0.002 | 228 | 0.30% |\n| 0.0007 | 109.64 | 6 px |\n\nAt 0.0007 the max is still 4095 DN, but p99.9 is 1976 DN (0.48 of full scale). The peak is still not below 95% of full scale. A level near 0.0005, or a central ROI of about 200x200, would be needed.\n\nRead-noise estimate: not computed. The dark temporal variance of 6.33 DN\u00b2 (short dark) is a per-pixel temporal variance and is only a rough guide. The conversion gain K has no value yet, because the photon-transfer slope is missing. The illumination is currently 0.0007 and the exposure is 500,000 us.\n\n[instrument record]\ncommands: 9 (9 applied), captures: 9\n  set_illumination {\"level\": 0} -> ok\n  capture 1 frame(s) at 1000 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.02 DN, std 2.52, max 53, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); file camera/cap001_dark_setup.npy\n  set_exposure {\"exposure_us\": 20} -> ok\n  capture 16 frame(s) at 20 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 40.01 DN, std 2.52, max 53, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5167 DN rms (var 6.3338, mean 40.004); file camera/cap002_dark_short_a.npy\n  set_exposure {\"exposure_us\": 500000} -> ok\n  capture 16 frame(s) at 500000 us, 0 dB, illumination 0, ROI 640x512+0+0: mean 45.99 DN, std 38.78, max 2641, p99.9 55.0 (0.0134 of full scale), saturated 0 px (0.0); temporal noise 2.9755 DN rms (var 8.8536, mean 46.001); file camera/cap003_dark_long_a.npy\n  set_illumination {\"level\": 0.5} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.5, ROI 640x512+0+0: mean 2422.27 DN, std 1705.93, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 151283 px (0.461679); file camera/cap004_test_bright.npy\n  set_illumination {\"level\": 0.1} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.1, ROI 640x512+0+0: mean 1640.91 DN, std 1716.68, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 91505 px (0.279251); file camera/cap005_test_bright_01.npy\n  set_illumination {\"level\": 0.02} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.02, ROI 640x512+0+0: mean 935.52 DN, std 1393.99, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 38921 px (0.118777); file camera/cap006_test_bright_02.npy\n  set_illumination {\"level\": 0.004} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.004, ROI 640x512+0+0: mean 379.26 DN, std 771.74, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 5538 px (0.016901); file camera/cap007_test_bright_03.npy\n  set_illumination {\"level\": 0.002} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.002, ROI 640x512+0+0: mean 228.37 DN, std 481.9, max 4095, p99.9 4095.0 (1.0 of full scale), saturated 981 px (0.002994); file camera/cap008_test_bright_04.npy\n  set_illumination {\"level\": 0.0007} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.0007, ROI 640x512+0+0: mean 109.64 DN, std 181.27, max 4095, p99.9 1976.3 (0.4826 of full scale), saturated 6 px (1.8e-05); file camera/cap009.npy",
+   "meta": {
+    "hw": "report",
+    "verified": {
+     "tool": "camera",
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0007
+     },
+     "stats": {
+      "mean_dn": 109.64,
+      "max_dn": 4095,
+      "p99_9_dn": 1976.3,
+      "saturated_pixels": 6,
+      "saturated_fraction": 1.8e-05,
+      "fraction_of_full_scale": {
+       "mean": 0.0268,
+       "p99_9": 0.4826,
+       "max": 1.0
+      }
+     },
+     "temporal_noise": null,
+     "frames": [
+      "cap001_dark_setup.npy",
+      "cap002_dark_short_a.npy",
+      "cap003_dark_long_a.npy",
+      "cap004_test_bright.npy",
+      "cap005_test_bright_01.npy",
+      "cap006_test_bright_02.npy",
+      "cap007_test_bright_03.npy",
+      "cap008_test_bright_04.npy",
+      "cap009.npy"
+     ],
+     "analysis": {
+      "speckle": {
+       "contrast": 1.0462,
+       "mean_above_black_dn": 1640.91,
+       "grain_fwhm_x_px": 196.485,
+       "grain_fwhm_y_px": 212.252,
+       "pixels": 327680
+      },
+      "beam": {
+       "centroid_x_px": 319.48,
+       "centroid_y_px": 255.68,
+       "d4sigma_x_px": 463.48,
+       "d4sigma_y_px": 445.9,
+       "total_dn": 537694992.0
+      }
+     }
+    }
+   }
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 3/10 -> hardware\nInstruction: Be efficient: you have only about 12 tool steps, so do NOT search illumination any more. Dark data already exist (cap002 short, cap003 long). Now capture the photon-transfer series with ONE 16-frame capture per level (the capture reports temporal noise var and mean, which are the PTC points). Steps: 1) set_illumination 0.0003 (if a set-ROI tool exists, set a central 200x200 ROI to avoid beam peaks/hot pixels; otherwise keep the full frame). 2) Use exposure 500000 us first as a test: if p99.9 is below 0.9 of full scale proceed, otherwise halve the illumination once. 3) Then capture 16 frames at each of these exposures, ascending: 50, 200, 1000, 5000, 20000, 50000, 100000, 200000, 350000, 500000 us (name files ptc_L##). Report for every capture: exposure, mean DN, temporal noise var, rms, max, p99.9 and saturated pixel count, and the file names. Keep gain 0 dB and illumination fixed for all levels. Finish with a concise table of all values the camera returned.\nReason: The PTC series is still missing; per-capture 16-frame mean and temporal variance give the points directly within the step budget.",
+   "meta": {
+    "decision": {
+     "next_role": "hardware",
+     "instruction": "Be efficient: you have only about 12 tool steps, so do NOT search illumination any more. Dark data already exist (cap002 short, cap003 long). Now capture the photon-transfer series with ONE 16-frame capture per level (the capture reports temporal noise var and mean, which are the PTC points). Steps: 1) set_illumination 0.0003 (if a set-ROI tool exists, set a central 200x200 ROI to avoid beam peaks/hot pixels; otherwise keep the full frame). 2) Use exposure 500000 us first as a test: if p99.9 is below 0.9 of full scale proceed, otherwise halve the illumination once. 3) Then capture 16 frames at each of these exposures, ascending: 50, 200, 1000, 5000, 20000, 50000, 100000, 200000, 350000, 500000 us (name files ptc_L##). Report for every capture: exposure, mean DN, temporal noise var, rms, max, p99.9 and saturated pixel count, and the file names. Keep gain 0 dB and illumination fixed for all levels. Finish with a concise table of all values the camera returned.",
+     "reason": "The PTC series is still missing; per-capture 16-frame mean and temporal variance give the points directly within the step budget."
+    },
+    "index": 3,
+    "guard_notes": [],
+    "verified": {
+     "tool": "camera",
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0007
+     },
+     "stats": {
+      "mean_dn": 109.64,
+      "max_dn": 4095,
+      "p99_9_dn": 1976.3,
+      "saturated_pixels": 6,
+      "saturated_fraction": 1.8e-05,
+      "fraction_of_full_scale": {
+       "mean": 0.0268,
+       "p99_9": 0.4826,
+       "max": 1.0
+      }
+     },
+     "temporal_noise": null,
+     "frames": [
+      "cap001_dark_setup.npy",
+      "cap002_dark_short_a.npy",
+      "cap003_dark_long_a.npy",
+      "cap004_test_bright.npy",
+      "cap005_test_bright_01.npy",
+      "cap006_test_bright_02.npy",
+      "cap007_test_bright_03.npy",
+      "cap008_test_bright_04.npy",
+      "cap009.npy"
+     ],
+     "analysis": {
+      "speckle": {
+       "contrast": 1.0462,
+       "mean_above_black_dn": 1640.91,
+       "grain_fwhm_x_px": 196.485,
+       "grain_fwhm_y_px": 212.252,
+       "pixels": 327680
+      },
+      "beam": {
+       "centroid_x_px": 319.48,
+       "centroid_y_px": 255.68,
+       "d4sigma_x_px": 463.48,
+       "d4sigma_y_px": 445.9,
+       "total_dn": 537694992.0
+      }
+     }
+    },
+    "refused_record": false
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "camera_info -> {\"vendor\": \"simulation\", \"model\": \"SimCam-640 (simulated 12-bit CMOS)\", \"sensor_width\": 640, \"sensor_height\": 512, \"bit_depth\": 12, \"max_dn\": 4095, \"exposure_range_us\": [20.0, 2000000.0], \"gain_range_db\": [0.0, 24.0], \"exposure_us\": 500000.0, \"gain_db\": 0.0, \"roi\": {\"x\": 0, \"y\": 0, \"width\": 640, \"height\": 512}, \"illumination_control\": true, \"lab_limits\": {\"max_exposure_us\": 500000, \"max_gain_db\": 24, \"max_frames\": 16}}",
+   "meta": {
+    "hw": "start",
+    "tool": "camera_info",
+    "result": {
+     "ok": true,
+     "vendor": "simulation",
+     "model": "SimCam-640 (simulated 12-bit CMOS)",
+     "sensor_width": 640,
+     "sensor_height": 512,
+     "bit_depth": 12,
+     "max_dn": 4095,
+     "exposure_range_us": [
+      20.0,
+      2000000.0
+     ],
+     "gain_range_db": [
+      0.0,
+      24.0
+     ],
+     "exposure_us": 500000.0,
+     "gain_db": 0.0,
+     "roi": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 512
+     },
+     "illumination_control": true,
+     "illumination": 0.0007,
+     "simulated": true,
+     "lab_limits": {
+      "max_exposure_us": 500000,
+      "max_gain_db": 24,
+      "max_frames": 16
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 1: set_illumination {\"level\": 0.0003}, then capture 1 frame(s)\nReason: Set the fixed illumination for the PTC series and test at 500000 us (current exposure).",
+   "meta": {
+    "hw": "decide",
+    "step": 1,
+    "decision": {
+     "action": "command",
+     "command": "set_illumination",
+     "command_args": {
+      "level": 0.0003
+     },
+     "n_frames": 1,
+     "label": "ptc_test",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Set the fixed illumination for the PTC series and test at 500000 us (current exposure)."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_illumination {\"level\": 0.0003} -> ok {\"illumination\": 0.0003}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_illumination",
+    "args": {
+     "level": 0.0003
+    },
+    "result": {
+     "ok": true,
+     "illumination": 0.0003
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 1 frame(s) at 500000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 73.79 DN, std 86.62, max 2687, p99.9 931.0 (0.2274 of full scale), saturated 0 px (0.0); file camera/cap010_ptc_test.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 73.79,
+      "std_dn": 86.62,
+      "min_dn": 32,
+      "max_dn": 2687,
+      "p99_9_dn": 931.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.018,
+       "p99_9": 0.2274,
+       "max": 0.6562
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap010_ptc_test.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap010_ptc_test.png",
+     "n_frames": 1
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 2: set_exposure {\"exposure_us\": 50}, then capture 16 frame(s)\nReason: Test passed (p99.9 0.227 of full scale), so start the series at 50 us. I'm skipping the ROI to save steps.",
+   "meta": {
+    "hw": "decide",
+    "step": 2,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 50
+     },
+     "n_frames": 16,
+     "label": "ptc_L01",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Test passed (p99.9 0.227 of full scale), so start the series at 50 us. I'm skipping the ROI to save steps."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 50} -> ok {\"exposure_us\": 50.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 50
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 50.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 50 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.0 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.516 DN rms (var 6.3301, mean 40.002); file camera/cap011_ptc_L01.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 50.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.0,
+      "std_dn": 2.52,
+      "min_dn": 28,
+      "max_dn": 51,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0125
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap011_ptc_L01.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap011_ptc_L01.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.002,
+      "temporal_var_dn2": 6.3301,
+      "temporal_std_dn": 2.516,
+      "frame_mean_spread_dn": 0.003
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 3: set_exposure {\"exposure_us\": 200}, then capture 16 frame(s)\nReason: Next PTC level at 200 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 3,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 200
+     },
+     "n_frames": 16,
+     "label": "ptc_L02",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 200 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 200} -> ok {\"exposure_us\": 200.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 200
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 200.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 200 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.01 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5187 DN rms (var 6.3438, mean 40.012); file camera/cap012_ptc_L02.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.01,
+      "std_dn": 2.52,
+      "min_dn": 28,
+      "max_dn": 51,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0125
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap012_ptc_L02.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap012_ptc_L02.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.012,
+      "temporal_var_dn2": 6.3438,
+      "temporal_std_dn": 2.5187,
+      "frame_mean_spread_dn": 0.004
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 4: set_exposure {\"exposure_us\": 1000}, then capture 16 frame(s)\nReason: Next PTC level at 1000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 4,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 1000
+     },
+     "n_frames": 16,
+     "label": "ptc_L03",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 1000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 1000} -> ok {\"exposure_us\": 1000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 1000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 1000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 1000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.07 DN, std 2.53, max 52, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5239 DN rms (var 6.3698, mean 40.069); file camera/cap013_ptc_L03.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 1000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.07,
+      "std_dn": 2.53,
+      "min_dn": 28,
+      "max_dn": 52,
+      "p99_9_dn": 48.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0117,
+       "max": 0.0127
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap013_ptc_L03.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap013_ptc_L03.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.069,
+      "temporal_var_dn2": 6.3698,
+      "temporal_std_dn": 2.5239,
+      "frame_mean_spread_dn": 0.003
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 5: set_exposure {\"exposure_us\": 5000}, then capture 16 frame(s)\nReason: Next PTC level at 5000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 5,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 5000
+     },
+     "n_frames": 16,
+     "label": "ptc_L04",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 5000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 5000} -> ok {\"exposure_us\": 5000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 5000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 5000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 5000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.33 DN, std 2.68, max 73, p99.9 51.0 (0.0125 of full scale), saturated 0 px (0.0); temporal noise 2.5453 DN rms (var 6.4786, mean 40.339); file camera/cap014_ptc_L04.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 5000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 40.33,
+      "std_dn": 2.68,
+      "min_dn": 28,
+      "max_dn": 73,
+      "p99_9_dn": 51.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0098,
+       "p99_9": 0.0125,
+       "max": 0.0178
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap014_ptc_L04.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap014_ptc_L04.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 40.339,
+      "temporal_var_dn2": 6.4786,
+      "temporal_std_dn": 2.5453,
+      "frame_mean_spread_dn": 0.006
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 6: set_exposure {\"exposure_us\": 20000}, then capture 16 frame(s)\nReason: Next PTC level at 20000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 6,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 20000
+     },
+     "n_frames": 16,
+     "label": "ptc_L05",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 20000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 20000} -> ok {\"exposure_us\": 20000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 20000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 20000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 20000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 41.35 DN, std 4.34, max 154, p99.9 77.0 (0.0188 of full scale), saturated 0 px (0.0); temporal noise 2.6292 DN rms (var 6.9126, mean 41.363); file camera/cap015_ptc_L05.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 20000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 41.35,
+      "std_dn": 4.34,
+      "min_dn": 29,
+      "max_dn": 154,
+      "p99_9_dn": 77.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0101,
+       "p99_9": 0.0188,
+       "max": 0.0376
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap015_ptc_L05.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap015_ptc_L05.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 41.363,
+      "temporal_var_dn2": 6.9126,
+      "temporal_std_dn": 2.6292,
+      "frame_mean_spread_dn": 0.012
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 7: set_exposure {\"exposure_us\": 50000}, then capture 16 frame(s)\nReason: Next PTC level at 50000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 7,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 50000
+     },
+     "n_frames": 16,
+     "label": "ptc_L06",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 50000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 50000} -> ok {\"exposure_us\": 50000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 50000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 50000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 50000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 43.43 DN, std 9.21, max 313, p99.9 133.0 (0.0325 of full scale), saturated 0 px (0.0); temporal noise 2.7859 DN rms (var 7.7611, mean 43.432); file camera/cap016_ptc_L06.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 50000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 43.43,
+      "std_dn": 9.21,
+      "min_dn": 29,
+      "max_dn": 313,
+      "p99_9_dn": 133.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0106,
+       "p99_9": 0.0325,
+       "max": 0.0764
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap016_ptc_L06.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap016_ptc_L06.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 43.432,
+      "temporal_var_dn2": 7.7611,
+      "temporal_std_dn": 2.7859,
+      "frame_mean_spread_dn": 0.025
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 8: set_exposure {\"exposure_us\": 100000}, then capture 16 frame(s)\nReason: Next PTC level at 100000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 8,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 100000
+     },
+     "n_frames": 16,
+     "label": "ptc_L07",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 100000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 100000} -> ok {\"exposure_us\": 100000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 100000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 100000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 100000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 46.82 DN, std 17.71, max 583, p99.9 221.0 (0.054 of full scale), saturated 0 px (0.0); temporal noise 3.0358 DN rms (var 9.216, mean 46.846); file camera/cap017_ptc_L07.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 100000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 46.82,
+      "std_dn": 17.71,
+      "min_dn": 30,
+      "max_dn": 583,
+      "p99_9_dn": 221.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0114,
+       "p99_9": 0.054,
+       "max": 0.1424
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap017_ptc_L07.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap017_ptc_L07.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 46.846,
+      "temporal_var_dn2": 9.216,
+      "temporal_std_dn": 3.0358,
+      "frame_mean_spread_dn": 0.053
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 9: set_exposure {\"exposure_us\": 200000}, then capture 16 frame(s)\nReason: Next PTC level at 200000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 9,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 200000
+     },
+     "n_frames": 16,
+     "label": "ptc_L08",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 200000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 200000} -> ok {\"exposure_us\": 200000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 200000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 200000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 200000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 53.82 DN, std 35.49, max 1113, p99.9 408.0 (0.0996 of full scale), saturated 0 px (0.0); temporal noise 3.4879 DN rms (var 12.1654, mean 53.779); file camera/cap018_ptc_L08.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 200000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 53.82,
+      "std_dn": 35.49,
+      "min_dn": 31,
+      "max_dn": 1113,
+      "p99_9_dn": 408.0,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0131,
+       "p99_9": 0.0996,
+       "max": 0.2718
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap018_ptc_L08.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap018_ptc_L08.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 53.779,
+      "temporal_var_dn2": 12.1654,
+      "temporal_std_dn": 3.4879,
+      "frame_mean_spread_dn": 0.107
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 10: set_exposure {\"exposure_us\": 350000}, then capture 16 frame(s)\nReason: Next PTC level at 350000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 10,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 350000
+     },
+     "n_frames": 16,
+     "label": "ptc_L09",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Next PTC level at 350000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 350000} -> ok {\"exposure_us\": 350000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 350000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 350000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 350000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 64.12 DN, std 61.82, max 1864, p99.9 682.3 (0.1666 of full scale), saturated 0 px (0.0); temporal noise 4.1188 DN rms (var 16.9646, mean 64.209); file camera/cap019_ptc_L09.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 350000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 64.12,
+      "std_dn": 61.82,
+      "min_dn": 31,
+      "max_dn": 1864,
+      "p99_9_dn": 682.3,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0157,
+       "p99_9": 0.1666,
+       "max": 0.4552
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap019_ptc_L09.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap019_ptc_L09.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 64.209,
+      "temporal_var_dn2": 16.9646,
+      "temporal_std_dn": 4.1188,
+      "frame_mean_spread_dn": 0.228
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 11: set_exposure {\"exposure_us\": 500000}, then capture 16 frame(s)\nReason: Last series level at 500000 us.",
+   "meta": {
+    "hw": "decide",
+    "step": 11,
+    "decision": {
+     "action": "command",
+     "command": "set_exposure",
+     "command_args": {
+      "exposure_us": 500000
+     },
+     "n_frames": 16,
+     "label": "ptc_L10",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "",
+     "reason": "Last series level at 500000 us."
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "set_exposure {\"exposure_us\": 500000} -> ok {\"exposure_us\": 500000.0}",
+   "meta": {
+    "hw": "command",
+    "tool": "set_exposure",
+    "args": {
+     "exposure_us": 500000
+    },
+    "result": {
+     "ok": true,
+     "exposure_us": 500000.0
+    }
+   }
+  },
+  {
+   "role": "instrument",
+   "content": "capture -> 16 frame(s) at 500000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 74.45 DN, std 88.23, max 2721, p99.9 949.3 (0.2318 of full scale), saturated 0 px (0.0); temporal noise 4.665 DN rms (var 21.762, mean 74.496); file camera/cap020_ptc_L10.npy",
+   "meta": {
+    "hw": "measure",
+    "capture": {
+     "ok": true,
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "height": 512,
+      "width": 640,
+      "mean_dn": 74.45,
+      "std_dn": 88.23,
+      "min_dn": 32,
+      "max_dn": 2721,
+      "p99_9_dn": 949.3,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0182,
+       "p99_9": 0.2318,
+       "max": 0.6645
+      }
+     },
+     "frame_file": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap020_ptc_L10.npy",
+     "preview_png": "C:\\Users\\erik_\\PyCharmMiscProject\\hw3\\agent\\runs\\uc2_noise\\work\\camera\\cap020_ptc_L10.png",
+     "n_frames": 16,
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 74.496,
+      "temporal_var_dn2": 21.762,
+      "temporal_std_dn": 4.665,
+      "frame_mean_spread_dn": 0.32
+     }
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware step 12: finish: Captured the PTC series: 16 frames per level at 0 dB, illumination 0.0003, full frame 640x512 (no ROI set). The test frame at 500000 us (cap010_ptc_test.npy) had p99.9 931 DN (0.2274 of full scale) and 0 saturated px. In the table, mean and var are the camera's temporal-noise values, rms is its temporal noise in DN, and max and p99.9 come from the capture summary. Every capture had 0 saturated px.\n\n| Level | Exposure (us) | Mean (DN) | Temporal var (DN\u00b2) | rms (DN) | Max (DN) | p99.9 (DN) | File |\n|---|---|---|---|---|---|---|---|\n| L01 | 50 | 40.002 | 6.3301 | 2.516 | 51 | 48.0 | cap011_ptc_L01.npy |\n| L02 | 200 | 40.012 | 6.3438 | 2.5187 | 51 | 48.0 | cap012_ptc_L02.npy |\n| L03 | 1000 | 40.069 | 6.3698 | 2.5239 | 52 | 48.0 | cap013_ptc_L03.npy |\n| L04 | 5000 | 40.339 | 6.4786 | 2.5453 | 73 | 51.0 | cap014_ptc_L04.npy |\n| L05 | 20000 | 41.363 | 6.9126 | 2.6292 | 154 | 77.0 | cap015_ptc_L05.npy |\n| L06 | 50000 | 43.432 | 7.7611 | 2.7859 | 313 | 133.0 | cap016_ptc_L06.npy |\n| L07 | 100000 | 46.846 | 9.216 | 3.0358 | 583 | 221.0 | cap017_ptc_L07.npy |\n| L08 | 200000 | 53.779 | 12.1654 | 3.4879 | 1113 | 408.0 | cap018_ptc_L08.npy |\n| L09 | 350000 | 64.209 | 16.9646 | 4.1188 | 1864 | 682.3 | cap019_ptc_L09.npy |\n| L10 | 500000 | 74.496 | 21.762 | 4.665 | 2721 | 949.3 | cap020_ptc_L10.npy |\n\nDark data from the earlier turn:\n- Short dark, 20 us, 16 frames (cap002_dark_short_a.npy): mean 40.004 DN, var 6.3338 DN\u00b2, rms 2.5167 DN.\n- Long dark, 500000 us, 16 frames (cap003_dark_long_a.npy): mean 46.001 DN, var 8.8536 DN\u00b2, rms 2.9755 DN, max 2641 DN.\n\nWhat was not done:\n- Only one capture per level, so there are no A/B frame pairs, no over-saturation levels and no repeat level.\n- The dark set is 16 frames per exposure, not the 50 and 20 requested.\n- series_log.csv and settings.json were not written.\n- Black level was not read back.\n- I computed no K and no read noise.\n\nBecause the beam is non-uniform, the frame-wide means include pixels at very different signal levels. The frame-mean points are therefore only rough PTC points. The saved .npy files allow a proper ROI analysis. Temporal variance rises linearly with mean above the dark level. From the table, between L01 and L10 the variance rises by 15.432 DN\u00b2 while the mean rises by 34.494 DN. That gives a rough slope of about 0.45 DN\u00b2/DN, or about 2.2 e-/DN. I did not fit this, so treat it as unconfirmed.\nReason: Series complete; step budget used up.",
+   "meta": {
+    "hw": "decide",
+    "step": 12,
+    "decision": {
+     "action": "finish",
+     "command": "none",
+     "command_args": {},
+     "n_frames": 1,
+     "label": "",
+     "regions": [],
+     "analyze": false,
+     "black_level_dn": 0.0,
+     "analysis_region": null,
+     "question": "",
+     "summary": "Captured the PTC series: 16 frames per level at 0 dB, illumination 0.0003, full frame 640x512 (no ROI set). The test frame at 500000 us (cap010_ptc_test.npy) had p99.9 931 DN (0.2274 of full scale) and 0 saturated px. In the table, mean and var are the camera's temporal-noise values, rms is its temporal noise in DN, and max and p99.9 come from the capture summary. Every capture had 0 saturated px.\n\n| Level | Exposure (us) | Mean (DN) | Temporal var (DN\u00b2) | rms (DN) | Max (DN) | p99.9 (DN) | File |\n|---|---|---|---|---|---|---|---|\n| L01 | 50 | 40.002 | 6.3301 | 2.516 | 51 | 48.0 | cap011_ptc_L01.npy |\n| L02 | 200 | 40.012 | 6.3438 | 2.5187 | 51 | 48.0 | cap012_ptc_L02.npy |\n| L03 | 1000 | 40.069 | 6.3698 | 2.5239 | 52 | 48.0 | cap013_ptc_L03.npy |\n| L04 | 5000 | 40.339 | 6.4786 | 2.5453 | 73 | 51.0 | cap014_ptc_L04.npy |\n| L05 | 20000 | 41.363 | 6.9126 | 2.6292 | 154 | 77.0 | cap015_ptc_L05.npy |\n| L06 | 50000 | 43.432 | 7.7611 | 2.7859 | 313 | 133.0 | cap016_ptc_L06.npy |\n| L07 | 100000 | 46.846 | 9.216 | 3.0358 | 583 | 221.0 | cap017_ptc_L07.npy |\n| L08 | 200000 | 53.779 | 12.1654 | 3.4879 | 1113 | 408.0 | cap018_ptc_L08.npy |\n| L09 | 350000 | 64.209 | 16.9646 | 4.1188 | 1864 | 682.3 | cap019_ptc_L09.npy |\n| L10 | 500000 | 74.496 | 21.762 | 4.665 | 2721 | 949.3 | cap020_ptc_L10.npy |\n\nDark data from the earlier turn:\n- Short dark, 20 us, 16 frames (cap002_dark_short_a.npy): mean 40.004 DN, var 6.3338 DN\u00b2, rms 2.5167 DN.\n- Long dark, 500000 us, 16 frames (cap003_dark_long_a.npy): mean 46.001 DN, var 8.8536 DN\u00b2, rms 2.9755 DN, max 2641 DN.\n\nWhat was not done:\n- Only one capture per level, so there are no A/B frame pairs, no over-saturation levels and no repeat level.\n- The dark set is 16 frames per exposure, not the 50 and 20 requested.\n- series_log.csv and settings.json were not written.\n- Black level was not read back.\n- I computed no K and no read noise.\n\nBecause the beam is non-uniform, the frame-wide means include pixels at very different signal levels. The frame-mean points are therefore only rough PTC points. The saved .npy files allow a proper ROI analysis. Temporal variance rises linearly with mean above the dark level. From the table, between L01 and L10 the variance rises by 15.432 DN\u00b2 while the mean rises by 34.494 DN. That gives a rough slope of about 0.45 DN\u00b2/DN, or about 2.2 e-/DN. I did not fit this, so treat it as unconfirmed.",
+     "reason": "Series complete; step budget used up."
+    }
+   }
+  },
+  {
+   "role": "executor",
+   "content": "Hardware turn report: Captured the PTC series: 16 frames per level at 0 dB, illumination 0.0003, full frame 640x512 (no ROI set). The test frame at 500000 us (cap010_ptc_test.npy) had p99.9 931 DN (0.2274 of full scale) and 0 saturated px. In the table, mean and var are the camera's temporal-noise values, rms is its temporal noise in DN, and max and p99.9 come from the capture summary. Every capture had 0 saturated px.\n\n| Level | Exposure (us) | Mean (DN) | Temporal var (DN\u00b2) | rms (DN) | Max (DN) | p99.9 (DN) | File |\n|---|---|---|---|---|---|---|---|\n| L01 | 50 | 40.002 | 6.3301 | 2.516 | 51 | 48.0 | cap011_ptc_L01.npy |\n| L02 | 200 | 40.012 | 6.3438 | 2.5187 | 51 | 48.0 | cap012_ptc_L02.npy |\n| L03 | 1000 | 40.069 | 6.3698 | 2.5239 | 52 | 48.0 | cap013_ptc_L03.npy |\n| L04 | 5000 | 40.339 | 6.4786 | 2.5453 | 73 | 51.0 | cap014_ptc_L04.npy |\n| L05 | 20000 | 41.363 | 6.9126 | 2.6292 | 154 | 77.0 | cap015_ptc_L05.npy |\n| L06 | 50000 | 43.432 | 7.7611 | 2.7859 | 313 | 133.0 | cap016_ptc_L06.npy |\n| L07 | 100000 | 46.846 | 9.216 | 3.0358 | 583 | 221.0 | cap017_ptc_L07.npy |\n| L08 | 200000 | 53.779 | 12.1654 | 3.4879 | 1113 | 408.0 | cap018_ptc_L08.npy |\n| L09 | 350000 | 64.209 | 16.9646 | 4.1188 | 1864 | 682.3 | cap019_ptc_L09.npy |\n| L10 | 500000 | 74.496 | 21.762 | 4.665 | 2721 | 949.3 | cap020_ptc_L10.npy |\n\nDark data from the earlier turn:\n- Short dark, 20 us, 16 frames (cap002_dark_short_a.npy): mean 40.004 DN, var 6.3338 DN\u00b2, rms 2.5167 DN.\n- Long dark, 500000 us, 16 frames (cap003_dark_long_a.npy): mean 46.001 DN, var 8.8536 DN\u00b2, rms 2.9755 DN, max 2641 DN.\n\nWhat was not done:\n- Only one capture per level, so there are no A/B frame pairs, no over-saturation levels and no repeat level.\n- The dark set is 16 frames per exposure, not the 50 and 20 requested.\n- series_log.csv and settings.json were not written.\n- Black level was not read back.\n- I computed no K and no read noise.\n\nBecause the beam is non-uniform, the frame-wide means include pixels at very different signal levels. The frame-mean points are therefore only rough PTC points. The saved .npy files allow a proper ROI analysis. Temporal variance rises linearly with mean above the dark level. From the table, between L01 and L10 the variance rises by 15.432 DN\u00b2 while the mean rises by 34.494 DN. That gives a rough slope of about 0.45 DN\u00b2/DN, or about 2.2 e-/DN. I did not fit this, so treat it as unconfirmed.\n\n[instrument record]\ncommands: 11 (11 applied), captures: 11\n  set_illumination {\"level\": 0.0003} -> ok\n  capture 1 frame(s) at 500000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 73.79 DN, std 86.62, max 2687, p99.9 931.0 (0.2274 of full scale), saturated 0 px (0.0); file camera/cap010_ptc_test.npy\n  set_exposure {\"exposure_us\": 50} -> ok\n  capture 16 frame(s) at 50 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.0 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.516 DN rms (var 6.3301, mean 40.002); file camera/cap011_ptc_L01.npy\n  set_exposure {\"exposure_us\": 200} -> ok\n  capture 16 frame(s) at 200 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.01 DN, std 2.52, max 51, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5187 DN rms (var 6.3438, mean 40.012); file camera/cap012_ptc_L02.npy\n  set_exposure {\"exposure_us\": 1000} -> ok\n  capture 16 frame(s) at 1000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.07 DN, std 2.53, max 52, p99.9 48.0 (0.0117 of full scale), saturated 0 px (0.0); temporal noise 2.5239 DN rms (var 6.3698, mean 40.069); file camera/cap013_ptc_L03.npy\n  set_exposure {\"exposure_us\": 5000} -> ok\n  capture 16 frame(s) at 5000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 40.33 DN, std 2.68, max 73, p99.9 51.0 (0.0125 of full scale), saturated 0 px (0.0); temporal noise 2.5453 DN rms (var 6.4786, mean 40.339); file camera/cap014_ptc_L04.npy\n  set_exposure {\"exposure_us\": 20000} -> ok\n  capture 16 frame(s) at 20000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 41.35 DN, std 4.34, max 154, p99.9 77.0 (0.0188 of full scale), saturated 0 px (0.0); temporal noise 2.6292 DN rms (var 6.9126, mean 41.363); file camera/cap015_ptc_L05.npy\n  set_exposure {\"exposure_us\": 50000} -> ok\n  capture 16 frame(s) at 50000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 43.43 DN, std 9.21, max 313, p99.9 133.0 (0.0325 of full scale), saturated 0 px (0.0); temporal noise 2.7859 DN rms (var 7.7611, mean 43.432); file camera/cap016_ptc_L06.npy\n  set_exposure {\"exposure_us\": 100000} -> ok\n  capture 16 frame(s) at 100000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 46.82 DN, std 17.71, max 583, p99.9 221.0 (0.054 of full scale), saturated 0 px (0.0); temporal noise 3.0358 DN rms (var 9.216, mean 46.846); file camera/cap017_ptc_L07.npy\n  set_exposure {\"exposure_us\": 200000} -> ok\n  capture 16 frame(s) at 200000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 53.82 DN, std 35.49, max 1113, p99.9 408.0 (0.0996 of full scale), saturated 0 px (0.0); temporal noise 3.4879 DN rms (var 12.1654, mean 53.779); file camera/cap018_ptc_L08.npy\n  set_exposure {\"exposure_us\": 350000} -> ok\n  capture 16 frame(s) at 350000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 64.12 DN, std 61.82, max 1864, p99.9 682.3 (0.1666 of full scale), saturated 0 px (0.0); temporal noise 4.1188 DN rms (var 16.9646, mean 64.209); file camera/cap019_ptc_L09.npy\n  set_exposure {\"exposure_us\": 500000} -> ok\n  capture 16 frame(s) at 500000 us, 0 dB, illumination 0.0003, ROI 640x512+0+0: mean 74.45 DN, std 88.23, max 2721, p99.9 949.3 (0.2318 of full scale), saturated 0 px (0.0); temporal noise 4.665 DN rms (var 21.762, mean 74.496); file camera/cap020_ptc_L10.npy",
+   "meta": {
+    "hw": "report",
+    "verified": {
+     "tool": "camera",
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "mean_dn": 74.45,
+      "max_dn": 2721,
+      "p99_9_dn": 949.3,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0182,
+       "p99_9": 0.2318,
+       "max": 0.6645
+      }
+     },
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 74.496,
+      "temporal_var_dn2": 21.762,
+      "temporal_std_dn": 4.665,
+      "frame_mean_spread_dn": 0.32
+     },
+     "frames": [
+      "cap010_ptc_test.npy",
+      "cap011_ptc_L01.npy",
+      "cap012_ptc_L02.npy",
+      "cap013_ptc_L03.npy",
+      "cap014_ptc_L04.npy",
+      "cap015_ptc_L05.npy",
+      "cap016_ptc_L06.npy",
+      "cap017_ptc_L07.npy",
+      "cap018_ptc_L08.npy",
+      "cap019_ptc_L09.npy",
+      "cap020_ptc_L10.npy"
+     ]
+    }
+   }
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 4/10 -> executor\nInstruction: Write ONE Python script (run with the coding tool) that analyses the saved frames in camera/ and prints NAME=value lines. Data: darks cap002_dark_short_a.npy (20 us, 16 frames) and cap003_dark_long_a.npy (500000 us, 16 frames); PTC series cap011..cap020 (ptc_L01..L10, exposures 50,200,1000,5000,20000,50000,100000,200000,350000,500000 us, 16 frames each, illumination 0.0003, 0 dB, 12-bit max 4095). Each .npy may be a stack (N,512,640); check shape. The beam is non-uniform and the long dark has hot pixels (dark current), so use robust per-pixel analysis: 1) Per level, per-pixel temporal mean and temporal variance over the 16 frames (ddof=1). 2) Read noise from the short dark: median over pixels of per-pixel temporal variance (also consecutive-pair var(diff)/2), READ_NOISE_DN = sqrt. Use a median or exclude hot pixels. 3) PTC: per level, take the pixels in a central 200x200 ROI and also bin pixels by dark-subtracted mean signal (e.g. 15 log-spaced bins over all pixels, excluding pixels with max=4095 and the hot pixels in the long dark where dark_long mean minus dark_short mean exceeds 5 DN). For each bin compute the mean signal (minus the short-dark mean per pixel) and the mean per-pixel temporal variance. Pool all levels and bins and fit var = g*signal + c (weighted or by robust linear fit) in the range up to 80% of full scale. g in DN/e-, K = 1/g in e-/DN. 4) READ_NOISE_E = K*READ_NOISE_DN; also report the intercept-based value sqrt(c)*K as a cross-check. Print K_E_PER_DN, GAIN_DN_PER_E, READ_NOISE_DN, READ_NOISE_E, READ_NOISE_E_PTC_INTERCEPT, DARK_MEAN_DN, N_POINTS_FIT, the fit R2, and DARK_CURRENT_DN_PER_S (median per-pixel long minus short dark / 0.49998 s). Note in the output that the frame pairs are consecutive frames within a 16-frame stack, so there is no separate A/B or repeat level.\nReason: Saved frames exist; the K and read noise values must come from a script, not from the hardware role's rough estimate.",
+   "meta": {
+    "decision": {
+     "next_role": "executor",
+     "instruction": "Write ONE Python script (run with the coding tool) that analyses the saved frames in camera/ and prints NAME=value lines. Data: darks cap002_dark_short_a.npy (20 us, 16 frames) and cap003_dark_long_a.npy (500000 us, 16 frames); PTC series cap011..cap020 (ptc_L01..L10, exposures 50,200,1000,5000,20000,50000,100000,200000,350000,500000 us, 16 frames each, illumination 0.0003, 0 dB, 12-bit max 4095). Each .npy may be a stack (N,512,640); check shape. The beam is non-uniform and the long dark has hot pixels (dark current), so use robust per-pixel analysis: 1) Per level, per-pixel temporal mean and temporal variance over the 16 frames (ddof=1). 2) Read noise from the short dark: median over pixels of per-pixel temporal variance (also consecutive-pair var(diff)/2), READ_NOISE_DN = sqrt. Use a median or exclude hot pixels. 3) PTC: per level, take the pixels in a central 200x200 ROI and also bin pixels by dark-subtracted mean signal (e.g. 15 log-spaced bins over all pixels, excluding pixels with max=4095 and the hot pixels in the long dark where dark_long mean minus dark_short mean exceeds 5 DN). For each bin compute the mean signal (minus the short-dark mean per pixel) and the mean per-pixel temporal variance. Pool all levels and bins and fit var = g*signal + c (weighted or by robust linear fit) in the range up to 80% of full scale. g in DN/e-, K = 1/g in e-/DN. 4) READ_NOISE_E = K*READ_NOISE_DN; also report the intercept-based value sqrt(c)*K as a cross-check. Print K_E_PER_DN, GAIN_DN_PER_E, READ_NOISE_DN, READ_NOISE_E, READ_NOISE_E_PTC_INTERCEPT, DARK_MEAN_DN, N_POINTS_FIT, the fit R2, and DARK_CURRENT_DN_PER_S (median per-pixel long minus short dark / 0.49998 s). Note in the output that the frame pairs are consecutive frames within a 16-frame stack, so there is no separate A/B or repeat level.",
+     "reason": "Saved frames exist; the K and read noise values must come from a script, not from the hardware role's rough estimate."
+    },
+    "index": 4,
+    "guard_notes": [],
+    "verified": {
+     "tool": "camera",
+     "settings": {
+      "exposure_us": 500000.0,
+      "gain_db": 0.0,
+      "roi": {
+       "x": 0,
+       "y": 0,
+       "width": 640,
+       "height": 512
+      },
+      "illumination": 0.0003
+     },
+     "stats": {
+      "mean_dn": 74.45,
+      "max_dn": 2721,
+      "p99_9_dn": 949.3,
+      "saturated_pixels": 0,
+      "saturated_fraction": 0.0,
+      "fraction_of_full_scale": {
+       "mean": 0.0182,
+       "p99_9": 0.2318,
+       "max": 0.6645
+      }
+     },
+     "temporal_noise": {
+      "pairs": 15,
+      "mean_dn": 74.496,
+      "temporal_var_dn2": 21.762,
+      "temporal_std_dn": 4.665,
+      "frame_mean_spread_dn": 0.32
+     },
+     "frames": [
+      "cap010_ptc_test.npy",
+      "cap011_ptc_L01.npy",
+      "cap012_ptc_L02.npy",
+      "cap013_ptc_L03.npy",
+      "cap014_ptc_L04.npy",
+      "cap015_ptc_L05.npy",
+      "cap016_ptc_L06.npy",
+      "cap017_ptc_L07.npy",
+      "cap018_ptc_L08.npy",
+      "cap019_ptc_L09.npy",
+      "cap020_ptc_L10.npy"
+     ]
+    },
+    "refused_record": false
+   }
+  },
+  {
+   "role": "executor",
+   "content": "The script ran and exited with code 0. These are its printed values.\n\n**Results**\n- K_E_PER_DN=2.2984760992739277\n- GAIN_DN_PER_E=0.43507087165965874\n- READ_NOISE_DN=2.462214450449026 (median per-pixel temporal variance of the short dark)\n- READ_NOISE_DN_PAIR=2.4289915602982237 (consecutive-pair estimate)\n- READ_NOISE_E=5.659341065643975\n- READ_NOISE_E_PTC_INTERCEPT=5.668689100836414 (from the fit intercept, sqrt(c)*K)\n- FIT_INTERCEPT_DN2=6.0825444780271765\n- FIT_R2=0.9990836239222277\n- N_POINTS_FIT=126 (N_POINTS_TOTAL=142)\n- DARK_MEAN_DN=40.003675270080564 (DARK_MEDIAN_DN=40.0)\n- DARK_CURRENT_DN_PER_S=10.375415016600664\n\n**Frame shapes and pairing**\n- The dark stacks and PTC stacks are all (16, 512, 640).\n- The frame pairs are consecutive frames within a 16-frame stack. There is no separate A/B pair and no repeat level.\n\n**Caveats**\n- N_HOT_PIXELS=187146. This is far more than a few hot pixels. The threshold (long dark mean minus short dark mean above 5 DN) flagged a large share of the sensor.\n- Those pixels were excluded from the fit. The median dark current of 10.4 DN/s suggests broad dark current rather than isolated hot pixels.\n- The fit rejected outliers iteratively at 3 sigma, which dropped 16 of the 142 points.\n- The fit has no check that it stays within 80% of full scale beyond the per-pixel mean cut. No check was made for a nonlinear response.\n- The dark set is 16 frames per exposure, not the 50 and 20 originally planned.\n- No black level was read back.\n- The 5.66 e- read noise from the dark and the 5.67 e- from the fit intercept agree.\n\nThe plot was saved as ptc.png.\n\n[tool record]\nwrite ptc_analysis.py: ok\nrun ptc_analysis.py: exit code 0, 1.3 s\nVERIFIED printed by the script: {'N_HOT_PIXELS': 187146.0, 'READ_NOISE_DN_MEDVAR': 2.462214450449026, 'READ_NOISE_DN_PAIR': 2.4289915602982237, 'DARK_CURRENT_DN_PER_S': 10.375415016600664, 'GAIN_DN_PER_E': 0.43507087165965874, 'K_E_PER_DN': 2.2984760992739277, 'FIT_INTERCEPT_DN2': 6.0825444780271765, 'FIT_R2': 0.9990836239222277, 'READ_NOISE_DN': 2.462214450449026, 'READ_NOISE_E': 5.659341065643975, 'READ_NOISE_E_PTC_INTERCEPT': 5.668689100836414}",
+   "meta": {
+    "verified": {
+     "tool": "coding_tool",
+     "script": "ptc_analysis.py",
+     "results": {
+      "N_HOT_PIXELS": 187146.0,
+      "READ_NOISE_DN_MEDVAR": 2.462214450449026,
+      "READ_NOISE_DN_PAIR": 2.4289915602982237,
+      "DARK_CURRENT_DN_PER_S": 10.375415016600664,
+      "GAIN_DN_PER_E": 0.43507087165965874,
+      "K_E_PER_DN": 2.2984760992739277,
+      "FIT_INTERCEPT_DN2": 6.0825444780271765,
+      "FIT_R2": 0.9990836239222277,
+      "READ_NOISE_DN": 2.462214450449026,
+      "READ_NOISE_E": 5.659341065643975,
+      "READ_NOISE_E_PTC_INTERCEPT": 5.668689100836414
+     }
+    }
+   }
+  },
+  {
+   "role": "orchestrator",
+   "content": "Decision 5/10 -> finish\nInstruction: Final report (values from script ptc_analysis.py, VERIFIED). Camera: simulated SimCam-640, 12-bit, 0 dB gain.\n- Conversion gain: K = 2.298 e-/DN (GAIN = 0.4351 DN/e-), from a photon-transfer fit (R2 = 0.99908, 126 of 142 points after 3-sigma rejection).\n- Read noise: 2.462 DN (median per-pixel temporal variance of the short dark; consecutive-pair estimate 2.429 DN) = 5.659 e-. The fit intercept gives 5.669 e-, which agrees with the dark value.\n- Dark mean: 40.004 DN. Median dark current: 10.38 DN/s, with 187146 pixels flagged as elevated in the long dark.\nCaveats: only 16 frames per dark set and per level (not the 50/20 planned). There are no separate A/B pairs or repeat level, so pairs are consecutive frames in a stack. The beam is non-uniform, so the analysis binned pixels by signal. No over-saturation levels were taken, so full well was not measured. Black level was not read back. The settings.json and series_log.csv files were not written. The PTC plot is saved as ptc.png.\nReason: A VERIFIED script result gives K and read noise consistently, so the run can end.",
+   "meta": {
+    "decision": {
+     "next_role": "finish",
+     "instruction": "Final report (values from script ptc_analysis.py, VERIFIED). Camera: simulated SimCam-640, 12-bit, 0 dB gain.\n- Conversion gain: K = 2.298 e-/DN (GAIN = 0.4351 DN/e-), from a photon-transfer fit (R2 = 0.99908, 126 of 142 points after 3-sigma rejection).\n- Read noise: 2.462 DN (median per-pixel temporal variance of the short dark; consecutive-pair estimate 2.429 DN) = 5.659 e-. The fit intercept gives 5.669 e-, which agrees with the dark value.\n- Dark mean: 40.004 DN. Median dark current: 10.38 DN/s, with 187146 pixels flagged as elevated in the long dark.\nCaveats: only 16 frames per dark set and per level (not the 50/20 planned). There are no separate A/B pairs or repeat level, so pairs are consecutive frames in a stack. The beam is non-uniform, so the analysis binned pixels by signal. No over-saturation levels were taken, so full well was not measured. Black level was not read back. The settings.json and series_log.csv files were not written. The PTC plot is saved as ptc.png.",
+     "reason": "A VERIFIED script result gives K and read noise consistently, so the run can end."
+    },
+    "index": 5,
+    "guard_notes": [],
+    "verified": {
+     "tool": "coding_tool",
+     "script": "ptc_analysis.py",
+     "results": {
+      "N_HOT_PIXELS": 187146.0,
+      "READ_NOISE_DN_MEDVAR": 2.462214450449026,
+      "READ_NOISE_DN_PAIR": 2.4289915602982237,
+      "DARK_CURRENT_DN_PER_S": 10.375415016600664,
+      "GAIN_DN_PER_E": 0.43507087165965874,
+      "K_E_PER_DN": 2.2984760992739277,
+      "FIT_INTERCEPT_DN2": 6.0825444780271765,
+      "FIT_R2": 0.9990836239222277,
+      "READ_NOISE_DN": 2.462214450449026,
+      "READ_NOISE_E": 5.659341065643975,
+      "READ_NOISE_E_PTC_INTERCEPT": 5.668689100836414
+     }
+    },
+    "refused_record": false
+   }
+  }
+ ],
+ "events": [
+  {
+   "type": "request",
+   "text": "Measure the camera's read noise (in electrons) and its conversion gain (electrons per DN) with dark frames and a photon-transfer series.",
+   "time": 1791969556.0741174
+  }
+ ],
+ "verified": {
+  "tool": "coding_tool",
+  "script": "ptc_analysis.py",
+  "results": {
+   "N_HOT_PIXELS": 187146.0,
+   "READ_NOISE_DN_MEDVAR": 2.462214450449026,
+   "READ_NOISE_DN_PAIR": 2.4289915602982237,
+   "DARK_CURRENT_DN_PER_S": 10.375415016600664,
+   "GAIN_DN_PER_E": 0.43507087165965874,
+   "K_E_PER_DN": 2.2984760992739277,
+   "FIT_INTERCEPT_DN2": 6.0825444780271765,
+   "FIT_R2": 0.9990836239222277,
+   "READ_NOISE_DN": 2.462214450449026,
+   "READ_NOISE_E": 5.659341065643975,
+   "READ_NOISE_E_PTC_INTERCEPT": 5.668689100836414
+  }
+ }
+}

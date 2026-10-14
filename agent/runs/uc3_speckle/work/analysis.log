@@ -1,0 +1,38 @@
+exit_code=0 seconds=1.0
+--- stdout ---
+SHAPE_SIG= (16, 512, 640) SHAPE_DARK= (16, 512, 640)
+MAX_DN=3244
+NSAT=0
+MAX_FRAC=0.7922
+DARK_MEAN=40.004
+DARK_VAR=6.3383
+CENTROID_X=318.6 CENTROID_Y=256.0
+ROI_X0=255
+ROI_Y0=192
+ROI_N=128
+SAT_IN_ROI=0
+ENVELOPE_VAR=0.434
+ENVELOPE_FLATTENED=yes
+CONTRAST_MEAN=0.9648
+CONTRAST_STD=0.0003
+PTC_SLOPE=0.4966
+K_EST=2.0138
+CONTRAST_CORR=0.9639
+GRAIN_FWHM_X_PX=2.896
+GRAIN_FWHM_Y_PX=2.736
+GRAIN_FWHM_RADIAL_PX=2.706
+GRAIN_STD_PX=0.001
+ACF_LAG0..4_X= [1.    0.75  0.287 0.034 0.02 ]
+PIXEL_PITCH=unknown
+PASS_NO_SAT= True
+PASS_C_LE_1= True
+PASS_GRAIN_GT_2PX= True
+PASS_XY_RATIO= True ratio=1.059
+
+--- stderr ---
+C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\uc3_speckle\work\analysis.py:53: RuntimeWarning: divide by zero encountered in divide
+  p=p/cnt;return p/ p[0,0]
+C:\Users\erik_\PyCharmMiscProject\hw3\agent\runs\uc3_speckle\work\analysis.py:53: RuntimeWarning: invalid value encountered in divide
+  p=p/cnt;return p/ p[0,0]
+C:\Users\erik_\anaconda3\Lib\site-packages\numpy\_core\_methods.py:134: RuntimeWarning: invalid value encountered in reduce
+  ret = umr_sum(arr, axis, dtype, out, keepdims, where=where)

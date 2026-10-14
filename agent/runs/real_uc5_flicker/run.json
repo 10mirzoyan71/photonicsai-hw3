@@ -1,0 +1,14 @@
+{
+ "thread": "real_uc5_flicker",
+ "model": "claude-cli:claude-sonnet-5-5",
+ "camera": "hikrobot",
+ "seed": 1,
+ "limits": {
+  "max_exposure_us": 500000,
+  "max_gain_db": 24,
+  "max_frames": 16
+ },
+ "human": false,
+ "bench": true,
+ "request": "The camera looks at a white surface under the lab's room lights, which may flicker. Find an exposure at which the frame-to-frame brightness is stable, with the image well exposed but not saturated, and report how strong the flicker is at a short exposure and at the exposure you chose."
+}

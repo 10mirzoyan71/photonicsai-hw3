@@ -1,0 +1,41 @@
+[
+ {
+  "type": "request",
+  "text": "Set the gain to 12 dB and choose the exposure so that the wall is at about half of the camera's range, then report the exposure and the temporal noise.",
+  "time": 1791986506.3022761
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "hard_decision",
+   "question": "I'm ready to start on the camera. This will turn auto gain and auto exposure off, use the highest available bit depth, set the gain to 12 dB, and capture 5-frame sets while adjusting the exposure until the wall's mean level is 45\u201355% of full range. The scene and lighting stay unchanged. Later steps capture 50 dark frames and 100 wall frames, which are used to compute the temporal noise. Should I proceed?",
+   "proposed_step": {
+    "role": "hardware",
+    "instruction": "Hardware turn, steps 1-2 of the plan. Connect to the camera. Turn Gain Auto and Exposure Auto off. Select the highest available bit depth (Mono12, else Mono10, else Mono8) and read back the pixel format, max value, gain range and exposure range. Set gain to 12 dB and read it back. Turn off gamma and other processing, and use free-run trigger. Set a starting exposure of about 5 ms (or the lowest allowed if the scene is bright). Capture 5 frames and save them losslessly as iter_<k>_*.npy or 16-bit png. Report the read-back pixel format, gain, exposure, frame rate and saved file names. Do not change the scene."
+   }
+  },
+  "time": 1791986541.5140152
+ },
+ {
+  "type": "reply",
+  "text": "yes",
+  "time": 1791986544.5861223
+ },
+ {
+  "type": "interrupt",
+  "payload": {
+   "kind": "hard_decision",
+   "question": "The wall is at 49.6% of full scale with exposure 4090 \u00b5s at 11.991 dB gain (12 dB requested). Temporal noise is 35.90 DN rms, from 5 frames and without dark subtraction. Should I finish and report this now? Or would you rather I first capture 16 frames at the same settings for a better noise estimate?",
+   "proposed_step": {
+    "role": "finish",
+    "instruction": "Final report (numbers from the instrument only): Camera Hikrobot MV-CS028-10UM, 12-bit (max 4095 DN). Gain: 12 dB requested, camera applied 11.991 dB. Exposure: 4090 \u00b5s (4.09 ms). At this exposure the wall mean in the 256x256 ROI (+840+604) is 2030.38 DN, 49.6% of full scale. Max 2201 DN, p99.9 2147 DN, saturated pixels 0. Temporal noise: 35.90 DN rms (variance 1288.84 DN\u00b2), from 5 frames (4 frame pairs). Frame-mean spread was 2.34 DN. Caveats: this is a 5-frame estimate, not the 100 frames in the plan, because the lab limit is 16 frames per capture. No dark frames were taken, because the light cannot be blocked by software, so the dark offset was not subtracted and read noise was not separated. Flicker was not checked beyond the frame-mean spread. Gamma, trigger mode and the auto modes could not be read back. Earlier iteration: 3250 \u00b5s gave 1626.1 DN (39.7%) and 32.21 DN rms noise."
+   }
+  },
+  "time": 1791986571.717934
+ },
+ {
+  "type": "reply",
+  "text": "yes",
+  "time": 1791986579.862206
+ }
+]

@@ -1,0 +1,13 @@
+exit_code=0 seconds=0.1
+--- stdout ---
+ENH230_mean=28.567
+ENH230_std=0.603
+FAR230_mean=23.317
+FAR230_std=1.323
+ENH380_mean=32.047
+ENH380_std=0.563
+FAR380_mean=22.361
+FAR380_std=1.046
+REALIZATIONS=3
+
+--- stderr ---
