@@ -58,6 +58,17 @@ def main():
         for _ in range(10):
             cam.grab()
         print(f"       {10 / (time.time() - t0):.1f} frames/s with software trigger at {e2:g} us")
+        step("read the device temperature (C)", cam.temperature_c)
+        bl0 = info.get("black_level_setting") or 180
+        step("set black level 200 (a larger value lowers the dark level)", lambda: cam.set_black_level(200))
+        fb = step("grab one frame", cam.grab)
+        print(f"       mean {fb.mean():.1f} DN at black level 200, {f2.mean():.1f} DN at {bl0}")
+        step(f"black level back to {bl0}", lambda: cam.set_black_level(bl0))
+        step("ADC 8 bit", lambda: cam.set_adc_bit_depth(8))
+        f8 = step("grab one frame", cam.grab)
+        step("ADC 12 bit", lambda: cam.set_adc_bit_depth(12))
+        f12 = step("grab one frame", cam.grab)
+        print(f"       distinct levels in a frame: {len(np.unique(f8))} with the 8-bit ADC, {len(np.unique(f12))} with 12 bits")
         w, h = info["sensor_width"], info["sensor_height"]
         roi = step("set a 256x256 ROI in the centre", lambda: cam.set_roi(w // 2 - 128, h // 2 - 128, 256, 256))
         step("grab with the ROI", lambda: cam.grab().shape)

@@ -73,6 +73,12 @@ def load_sdk():
     return mvs
 
 
+def _bits(name):
+    """12 from an ADCBitDepth entry such as 'Bits_12' (the name itself if it has no number)."""
+    digits = "".join(c for c in str(name) if c.isdigit())
+    return int(digits) if digits else name
+
+
 def _cstr(arr) -> str:
     return bytes(bytearray(arr)).split(b"\0", 1)[0].decode("ascii", "replace")
 
@@ -179,7 +185,7 @@ class HikrobotCamera(Camera):
                "height": self._int("Height")[0]}
         return {"vendor": self.vendor, "model": self.model, "serial": self.serial, "interface": "USB3 Vision via Hikrobot MVS SDK",
                 "sensor_width": wmax, "sensor_height": hmax, "bit_depth": self.bit_depth, "pixel_format": self.pixel_format,
-                "adc_bit_depth": self.adc_bit_depth, "black_level_setting": self.black_level_setting,
+                "adc_bit_depth": _bits(self.adc_bit_depth), "black_level_setting": self.black_level_setting,
                 "max_dn": 2 ** self.bit_depth - 1, "exposure_range_us": [emin, emax], "gain_range_db": [gmin, gmax],
                 "exposure_us": round(e, 2), "gain_db": round(g, 3), "roi": roi, "illumination_control": False,
                 "simulated": False}
@@ -214,6 +220,41 @@ class HikrobotCamera(Camera):
             self._start()
         r = self.info()["roi"]
         return r["x"], r["y"], r["width"], r["height"]
+
+    def set_black_level(self, value: int) -> int:
+        """BlackLevel (integer node). On this camera a LARGER value gives a LOWER dark level: 240 puts it at 0 DN (half of
+        the dark noise clipped), 180 at about 62 DN (lab, 12-bit ADC, 0 dB)."""
+        _, lo, hi, _ = self._int("BlackLevel")
+        if not lo <= int(value) <= hi:
+            raise CameraError(f"black level {value} outside the camera range {lo}..{hi}")
+        self._check(self.cam.MV_CC_SetIntValueEx("BlackLevel", int(value)), "set BlackLevel")
+        self.black_level_setting = int(self._int("BlackLevel")[0])
+        return self.black_level_setting
+
+    def set_adc_bit_depth(self, bits: int) -> int:
+        """ADCBitDepth (enumeration such as Bits_8 / Bits_12), changed with the acquisition stopped."""
+        v = self.mvs.MVCC_ENUMVALUE()
+        if self.cam.MV_CC_GetEnumValue("ADCBitDepth", v) != 0:
+            raise CameraError("this camera has no ADCBitDepth setting")
+        offered = {}
+        for i in range(v.nSupportedNum):
+            e = self.mvs.MVCC_ENUMENTRY()
+            e.nValue = v.nSupportValue[i]
+            name = (bytes(e.chSymbolic).split(b"\0")[0].decode()
+                    if self.cam.MV_CC_GetEnumEntrySymbolic("ADCBitDepth", e) == 0 else str(v.nSupportValue[i]))
+            offered[_bits(name)] = (v.nSupportValue[i], name)
+        if int(bits) not in offered:
+            raise CameraError(f"ADC bit depth {bits} is not offered; the camera offers {sorted(offered, key=str)}")
+        self._stop()
+        try:
+            self._check(self.cam.MV_CC_SetEnumValue("ADCBitDepth", offered[int(bits)][0]), "set ADCBitDepth")
+        finally:
+            self._start()
+        self.adc_bit_depth = offered[int(bits)][1]
+        return int(bits)
+
+    def temperature_c(self) -> float:
+        return round(float(self._float("DeviceTemperature")[0]), 2)
 
     def grab(self) -> np.ndarray:
         self._start()

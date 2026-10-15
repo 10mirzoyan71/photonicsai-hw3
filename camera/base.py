@@ -41,6 +41,19 @@ class Camera(ABC):
         """Light source level 0..1. Only the simulated bench can do this; on the lab bench a person does it."""
         raise CameraError("the illumination is not under software control on this bench: ask the person")
 
+    def set_black_level(self, value: int) -> int:
+        """The offset added before digitisation, in the camera's own units; returns the applied value. The dark level
+        it gives has to be measured with dark frames."""
+        raise CameraError("this camera has no black-level setting")
+
+    def set_adc_bit_depth(self, bits: int) -> int:
+        """Bits of the analogue-to-digital converter (e.g. 8 or 12); returns the applied value."""
+        raise CameraError("this camera has no ADC bit-depth setting")
+
+    def temperature_c(self) -> float:
+        """The device (sensor board) temperature in degrees C."""
+        raise CameraError("this camera reports no temperature")
+
     def close(self) -> None:
         pass
 

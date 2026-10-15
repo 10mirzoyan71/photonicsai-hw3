@@ -10,9 +10,10 @@ flicker-free exposure, and puts the measured numbers into the camera model of th
 the focusing enhancement with this camera.
 
 ```
+hw3.py         one entry point: tests, camera check, tool list, runs, live view, demo, MCP client config
 camera/        connector layer: base.py (the camera interface), hikrobot_camera.py (MVS SDK), sim_camera.py
                (simulated camera: laser-speckle or room-light scene), stats.py (image statistics)
-mcp_server/    camera_server.py: MCP server (stdio) exposing the camera's controls as 9 tools; logs every call
+mcp_server/    camera_server.py: MCP server (stdio) exposing the camera's controls as 13 tools; logs every call
 agent/         agent_v3.py (the HW1/HW2 graph + the hardware turn), mcp_bridge.py (MCP client), run_hw3.py (runs a
                request), bench.py (the HW2 simulated bench and focusing tool), coding_tool.py, claude_cli.py,
                render_hw3.py / render_tools.py (report tables and sequence diagrams), live_view.py, demo_real.py
@@ -37,6 +38,16 @@ python -m venv .venv
 * **The real camera:** install Hikrobot **MVS** (free, Hikrobot download centre) with its SDK; the connector finds the SDK
   and its Python wrapper (`MvImport`) through the MVS installation. Plug the camera into a USB 3 port and **close the MVS
   client** before a run (the connector opens the camera exclusively). The simulated camera needs nothing extra.
+
+## One command
+```
+python hw3.py test           # all offline tests in one go, with a summary
+python hw3.py check-camera   # MVS SDK, then the plugged-in camera
+python hw3.py tools          # the 13 MCP tools as a client sees them
+python hw3.py run --thread t1 --camera hikrobot --request "..."
+python hw3.py live           # live view of the agent's captures
+python hw3.py mcp-config     # the entry that adds the camera server to any MCP client (e.g. Claude Desktop)
+```
 
 ## Tests (no model needed)
 ```
@@ -74,6 +85,21 @@ be resumed later with `--reply "..."`. `python demo_real.py --thread my_demo` op
 Demo videos: `video/hw3_demo_real_camera.mp4` (the agent sets the exposure of the real camera through MCP) and
 `video/hw3_demo_human_stop.mp4` (the graph stops twice for the person's approval). Raw camera frames (`.npy`) are not in
 the repository because of their size; each capture has a `.png` preview and is listed in `calls.jsonl`.
+
+## Additions after the deadline extension (October 2026)
+* **Four new MCP tools** (13 in total): `set_black_level` and `set_adc_bit_depth` (the two settings that the lab session
+  showed matter for noise measurements: an 8-bit ADC hides the read noise, a black level at 0 DN clips the dark noise),
+  `read_temperature` (device temperature; dark current depends on it) and `save_tiff` (a capture as a 16-bit multi-page
+  TIFF for ImageJ/Fiji). They are in the connector interface (`camera/base.py`), the Hikrobot connector (GenICam nodes
+  `BlackLevel`, `ADCBitDepth`, `DeviceTemperature`) and the simulated camera (which models the 8-bit ADC's coarse
+  levels). A restarted server restores them from `calls.jsonl` like the other settings; the hardware turn's VERIFIED
+  record includes temperatures and TIFF files.
+* **`hw3.py`**: one entry point for tests, camera check, runs, live view, demo and the MCP client configuration.
+* **Token meter**: every model call through the Claude Code CLI is counted (calls, input/output tokens, the CLI's cost
+  estimate), and `model@low` lowers the model's thinking effort (about 40 % fewer output tokens in a test).
+* The MCP client always uses the Windows proactor event loop, so the camera server also starts inside other apps.
+* Tests: `test_mcp_server.py` checks the new tools (8-bit levels, dark level at a new black level, TIFF pages equal to
+  the frames, settings restored after a server restart); `tests/check_real_camera.py` checks them on the lab camera.
 
 ## Report
 ```

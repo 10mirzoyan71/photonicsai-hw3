@@ -55,7 +55,7 @@ def _restore():
             res = rec.get("result", {})
             if not res.get("ok"):
                 continue
-            if rec["tool"] in ("set_exposure", "set_gain", "set_illumination"):
+            if rec["tool"] in ("set_exposure", "set_gain", "set_illumination", "set_black_level", "set_adc_bit_depth"):
                 last[rec["tool"]] = res
             elif rec["tool"] in ("set_roi", "reset_roi"):
                 last["roi"] = res["roi"]
@@ -72,6 +72,10 @@ def _restore():
         applied["roi"] = CAM.set_roi(r["x"], r["y"], r["width"], r["height"])
     if "set_illumination" in last:
         applied["illumination"] = CAM.set_illumination(last["set_illumination"]["illumination"])
+    if "set_black_level" in last:
+        applied["black_level"] = CAM.set_black_level(last["set_black_level"]["black_level"])
+    if "set_adc_bit_depth" in last:
+        applied["adc_bit_depth"] = CAM.set_adc_bit_depth(last["set_adc_bit_depth"]["adc_bit_depth"])
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"time": round(time.time(), 3), "seconds": 0, "tool": "server_restart_restore", "args": {},
                              "result": {"ok": True, "restored": applied, "captures_so_far": caps}}, default=str) + "\n")
@@ -99,7 +103,8 @@ def _log(tool, args, result, t0):
 def _settings():
     i = CAM.info()
     return {"exposure_us": i["exposure_us"], "gain_db": i["gain_db"], "roi": i["roi"],
-            **({"illumination": i["illumination"]} if i.get("illumination_control") else {})}
+            **({"illumination": i["illumination"]} if i.get("illumination_control") else {}),
+            **{k: i[k] for k in ("adc_bit_depth", "black_level_setting") if i.get(k) is not None}}
 
 
 def _call(tool, args, fn):
@@ -160,6 +165,46 @@ def set_illumination(level: float) -> dict:
     """Light source level 0..1 on the simulated camera only (0 = dark, for dark frames). On the lab camera it returns an
     error, and a person has to block or unblock the light."""
     return _call("set_illumination", {"level": level}, lambda: {"illumination": CAM.set_illumination(level)})
+
+
+@mcp.tool()
+def set_black_level(value: int) -> dict:
+    """Set the black level: the offset added before digitisation, in the camera's own units (on the Hikrobot camera a
+    LARGER value gives a LOWER dark level; on the simulated camera it is the dark level in DN). Measure the dark level
+    with dark frames afterwards: it must stay well above 0 DN, or the dark noise is clipped and under-estimated."""
+    return _call("set_black_level", {"value": value}, lambda: {"black_level": CAM.set_black_level(value)})
+
+
+@mcp.tool()
+def set_adc_bit_depth(bits: int) -> dict:
+    """Set the bits of the analogue-to-digital converter (8 or 12). Frames keep the same DN scale, but an 8-bit ADC
+    gives only 256 levels (steps of about 16 DN), which hides a read noise of a few DN. Use 12 bits for noise
+    measurements."""
+    return _call("set_adc_bit_depth", {"bits": bits}, lambda: {"adc_bit_depth": CAM.set_adc_bit_depth(bits)})
+
+
+@mcp.tool()
+def read_temperature() -> dict:
+    """The camera's device temperature in degrees C (dark current roughly doubles every 6-8 C, so long series and
+    dark frames should report it)."""
+    return _call("read_temperature", {}, lambda: {"temperature_c": CAM.temperature_c()})
+
+
+@mcp.tool()
+def save_tiff(frame_file: str) -> dict:
+    """Save a captured frame stack (.npy) as a 16-bit TIFF, one page per frame, for ImageJ/Fiji or other software.
+    Returns the TIFF file."""
+    def f():
+        from PIL import Image
+        path = frame_file if os.path.isabs(frame_file) else os.path.join(OUT, frame_file)
+        if not os.path.exists(path):
+            raise CameraError(f"no such frame file: {frame_file}")
+        stack = np.load(path)
+        pages = [Image.fromarray(fr.astype(np.uint16)) for fr in stack]
+        tif = os.path.splitext(path)[0] + ".tif"
+        pages[0].save(tif, save_all=True, append_images=pages[1:])
+        return {"tiff_file": tif, "pages": len(pages), "shape": list(stack.shape[1:]), "dtype": "uint16"}
+    return _call("save_tiff", {"frame_file": frame_file}, f)
 
 
 @mcp.tool()

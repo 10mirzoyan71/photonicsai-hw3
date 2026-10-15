@@ -64,6 +64,7 @@ class SimCamera(Camera):
             self.laser_noise = 0.003           # the lamps' own shot-to-shot noise, besides the flicker
 
         self.exposure_us, self.gain_db = 1000.0, 0.0
+        self.adc_bits = bit_depth              # an 8-bit ADC leaves 256 levels of the 12-bit output (steps of ~16 DN)
         self.roi = (0, 0, width, height)
         self.illumination = 1.0
         self.frames_grabbed = 0
@@ -116,6 +117,7 @@ class SimCamera(Camera):
                 "exposure_range_us": list(self.exposure_range_us), "gain_range_db": list(self.gain_range_db),
                 "exposure_us": self.exposure_us, "gain_db": self.gain_db,
                 "roi": dict(zip(("x", "y", "width", "height"), self.roi)),
+                "adc_bit_depth": self.adc_bits, "black_level_setting": self.black_level_dn,
                 "illumination_control": True, "illumination": self.illumination, "simulated": True, "scene": self.scene}
 
     def set_exposure(self, exposure_us: float) -> float:
@@ -140,6 +142,23 @@ class SimCamera(Camera):
         self.roi = (x, y, width, height)
         return self.roi
 
+    def set_black_level(self, value: int) -> int:
+        """In the simulation the black level is the dark offset itself, in DN."""
+        if not 0 <= int(value) <= 500:
+            raise CameraError("black level must be 0..500 DN on the simulated camera")
+        self.black_level_dn = float(int(value))
+        return int(value)
+
+    def set_adc_bit_depth(self, bits: int) -> int:
+        if int(bits) not in (8, self.bit_depth):
+            raise CameraError(f"ADC bit depth must be 8 or {self.bit_depth}")
+        self.adc_bits = int(bits)
+        return self.adc_bits
+
+    def temperature_c(self) -> float:
+        """A simulated sensor that warms from 38 C towards 41 C over about 10 minutes."""
+        return round(38.0 + 3.0 * (1 - np.exp(-self._now() / 600.0)) + 0.05 * self.rng.standard_normal(), 2)
+
     def set_illumination(self, level: float) -> float:
         if not 0.0 <= level <= 1.0:
             raise CameraError("illumination level must be between 0 and 1")
@@ -159,6 +178,9 @@ class SimCamera(Camera):
         e = self.rng.poisson(mean_e).astype(float) + self.read_noise_e * self.rng.standard_normal(mean_e.shape)
         e = np.minimum(e, self.full_well_e)                       # full well; read noise below zero survives the offset
         dn = np.round(e / self.conversion_gain_e_per_dn() + self.black_level_dn)
+        if self.adc_bits < self.bit_depth:                        # coarser ADC: fewer levels across the same range
+            step = (2 ** self.bit_depth - 1) / (2 ** self.adc_bits - 1)
+            dn = np.round(np.round(dn / step) * step)
         self.frames_grabbed += 1
         return np.clip(dn, 0, 2 ** self.bit_depth - 1).astype(np.uint16)
 

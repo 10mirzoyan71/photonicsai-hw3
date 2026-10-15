@@ -27,7 +27,8 @@ class MCPBridge:
         self.params = StdioServerParameters(command=sys.executable, args=[SERVER], env=env)
         self.timeout = timeout
         self.log: list[dict] = []                       # every call made through the bridge (tool, args, result)
-        self.loop = asyncio.new_event_loop()
+        # the server is a subprocess: on Windows that needs the proactor loop, whatever loop policy the host app set
+        self.loop = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
         self._ready, self._stop = threading.Event(), None
         self._error = None
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)

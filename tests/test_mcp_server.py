@@ -4,6 +4,9 @@ import os
 import sys
 import tempfile
 
+import numpy as np
+from PIL import Image
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "agent"))
 from mcp_bridge import MCPBridge  # noqa: E402
@@ -37,9 +40,36 @@ def main():
         r = json.loads(lc["set_gain"].invoke({"gain_db": 6}))
         assert r["ok"] and r["gain_db"] == 6.0
         assert json.loads(lc["camera_info"].invoke({}))["gain_db"] == 6.0          # state kept in the one session
+        # added tools: temperature, ADC bit depth, black level, TIFF export
+        t = br.call("read_temperature")
+        assert t["ok"] and 30 < t["temperature_c"] < 50, t
+        assert br.call("set_adc_bit_depth", {"bits": 8})["adc_bit_depth"] == 8
+        br.call("set_illumination", {"level": 0})
+        fr = np.load(br.call("capture", {"n_frames": 1, "label": "dark8"})["frame_file"])[0]
+        step = 4095 / 255
+        assert np.all(np.abs(np.unique(fr) / step - np.round(np.unique(fr) / step)) < 0.05), np.unique(fr)[:10]
+        assert br.call("set_adc_bit_depth", {"bits": 10})["ok"] is False
+        assert br.call("set_adc_bit_depth", {"bits": 12})["adc_bit_depth"] == 12
+        assert br.call("set_black_level", {"value": 100})["black_level"] == 100
+        dark = br.call("capture", {"n_frames": 2, "label": "dark_bl100"})
+        assert dark["settings"]["black_level_setting"] == 100 and abs(dark["stats"]["mean_dn"] - 100) < 2, dark["stats"]
+        tif = br.call("save_tiff", {"frame_file": os.path.basename(dark["frame_file"])})
+        img = Image.open(tif["tiff_file"])
+        assert tif["pages"] == 2 and img.n_frames == 2 and img.mode.startswith("I;16")
+        assert np.array_equal(np.array(img), np.load(dark["frame_file"])[0])
+        print(f"temperature {t['temperature_c']} C; 8-bit ADC levels {np.unique(fr)[:4]}...; dark level at black level "
+              f"100: {dark['stats']['mean_dn']:.1f} DN; TIFF {os.path.basename(tif['tiff_file'])} ({tif['pages']} pages)")
         calls = [json.loads(line) for line in open(os.path.join(out, "calls.jsonl"), encoding="utf-8")]
         print(f"calls.jsonl: {len(calls)} records, tools {[c['tool'] for c in calls]}")
-        assert len(calls) == 9
+        assert len(calls) == 18
+        br.call("set_adc_bit_depth", {"bits": 8})
+    finally:
+        br.close()
+    br = MCPBridge(out, seed=2)                      # a restarted server restores the settings from calls.jsonl
+    try:
+        info = br.call("camera_info")
+        assert info["adc_bit_depth"] == 8 and info["black_level_setting"] == 100 and info["gain_db"] == 6.0, info
+        print("restart: ADC 8 bit, black level 100 and gain 6 dB restored")
     finally:
         br.close()
     print("ALL MCP SERVER CHECKS PASSED")

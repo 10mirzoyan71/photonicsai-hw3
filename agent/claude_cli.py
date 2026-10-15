@@ -17,6 +17,32 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
+
+# Token meter shared by every model call in this process (all teams of the lab assistant): the Claude subscription has
+# usage limits, so each run reports what it used. Keys: calls, input, output, cache_read, cache_write, cost_usd,
+# and per-model counts in by_model.
+USAGE = {"calls": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost_usd": 0.0, "by_model": {}}
+_USAGE_LOCK = threading.Lock()
+
+
+def _count(model: str, out: dict):
+    u = out.get("usage") or {}
+    with _USAGE_LOCK:
+        USAGE["calls"] += 1
+        USAGE["input"] += int(u.get("input_tokens") or 0)
+        USAGE["output"] += int(u.get("output_tokens") or 0)
+        USAGE["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
+        USAGE["cache_write"] += int(u.get("cache_creation_input_tokens") or 0)
+        USAGE["cost_usd"] += float(out.get("total_cost_usd") or 0.0)
+        m = USAGE["by_model"].setdefault(model, {"calls": 0, "output": 0})
+        m["calls"] += 1
+        m["output"] += int(u.get("output_tokens") or 0)
+
+
+def usage_snapshot() -> dict:
+    with _USAGE_LOCK:
+        return {**USAGE, "by_model": {k: dict(v) for k, v in USAGE["by_model"].items()}}
 
 
 def find_cli() -> str:
@@ -49,7 +75,8 @@ The tools and their arguments (JSON schema):
 class ClaudeCLI:
     def __init__(self, model: str, timeout: int = 1200, retries: int = 3):
         self.exe = find_cli()
-        self.model = model
+        # "claude-haiku-5-5@low": the part after @ is the CLI's --effort (low thinking = fewer output tokens)
+        self.model, _, self.effort = model.partition("@")
         self.timeout = timeout
         self.retries = retries
         self.cwd = os.path.join(tempfile.gettempdir(), "claude_cli_agent")     # empty folder: no project files
@@ -61,6 +88,8 @@ class ClaudeCLI:
         cmd = [self.exe, "-p", "--output-format", "json", "--model", self.model, "--tools", "",
                "--system-prompt", system, "--no-session-persistence", "--strict-mcp-config",
                "--setting-sources", "", "--disable-slash-commands"]
+        if self.effort:
+            cmd += ["--effort", self.effort]
         if schema is not None:
             cmd += ["--json-schema", json.dumps(schema)]
         err = ""
@@ -83,6 +112,7 @@ class ClaudeCLI:
                 err = "no structured output in the reply"
                 continue
             self.n_calls += 1
+            _count(self.model, out)
             return out
         raise RuntimeError(f"claude -p failed {self.retries} times: {err}")
 

@@ -35,6 +35,7 @@ MAX_DECISIONS = 10
 MAX_HW_STEPS = 12
 MEASURE_TOOLS = ("capture", "analyze_frame")
 SELF_MEASURING = ("capture_series",)      # commands that are themselves a measurement: no capture follows them
+NO_CAPTURE = SELF_MEASURING + ("read_temperature", "save_tiff")   # commands after which no capture follows
 INFO_TOOL = "camera_info"
 
 
@@ -71,6 +72,19 @@ class DecisionAuto(BaseModel):
     reason: str = Field(description="one sentence: why this role now")
 
 
+class DecisionHITLNoHW(DecisionHITL):
+    """Orchestrator decision of a team without an instrument, when a person can be asked."""
+    next_role: Literal["scientist", "general", "executor", "human", "finish"] = Field(
+        description="who gets the turn; 'human' pauses the graph")
+    pending_role: Literal["none", "executor", "finish"] = Field(
+        "none", description="only for a hard decision: the step that waits for approval")
+
+
+class DecisionAutoNoHW(DecisionAuto):
+    """Orchestrator decision of a team without an instrument, working on its own."""
+    next_role: Literal["scientist", "general", "executor", "finish"]
+
+
 class HWDecision(BaseModel):
     """The executor's decision at one step of a hardware turn."""
     action: Literal["command", "measure", "ask_person", "finish"] = Field(
@@ -105,6 +119,10 @@ Roles:
 - finish: end the run; the instruction is your final report, quoting only numbers that the instrument or a script
   returned (VERIFIED records). Finishing is allowed only after a VERIFIED measurement exists.
 You have at most {max_dec} decisions in total; budget them."""
+ORCH_FIRST_LINE = "You are the ORCHESTRATOR of a team that works with a laboratory camera."
+HW_ROLE_LINE = """- hardware: the EXECUTOR drives the camera through its MCP tools in a hardware turn (decide -> command -> measure ->
+  decide), following your instruction; it returns the settings and measurements the camera reported.
+"""
 
 ORCH_HUMAN = """
 - human: pause the graph and ask the person. Use it in exactly two situations, judging from the dialogue:
@@ -350,10 +368,14 @@ def focusing_spec(out_dir) -> ToolSpec:
 # graph
 # ----------------------------------------------------------------------------
 def build_graph(backend, bridge, workdir: str, allow_human: bool = True, max_decisions: int = MAX_DECISIONS,
-                max_hw_steps: int = MAX_HW_STEPS, checkpointer=None, on_turn=None, bench_dir: str | None = None):
-    """bridge: mcp_bridge.MCPBridge (or a stand-in with call(name, args), tool_defs). workdir: the coding tool's
-    working directory; the camera server writes its frames to workdir/camera. bench_dir: if given, the executor also
-    holds the Homework 2 focusing tool (simulated bench), writing to that folder."""
+                max_hw_steps: int = MAX_HW_STEPS, checkpointer=None, on_turn=None, bench_dir: str | None = None,
+                prompts: dict | None = None):
+    """bridge: mcp_bridge.MCPBridge (or a stand-in with call(name, args), tool_defs), or None for a team without an
+    instrument (no hardware turn). workdir: the coding tool's working directory; the camera server writes its frames to
+    workdir/camera. bench_dir: if given, the executor also holds the Homework 2 focusing tool (simulated bench), writing
+    to that folder. prompts: optional overrides {"team": first line of the orchestrator prompt, "scientist": ...,
+    "general": ..., "executor": extra executor instructions} for the teams of the lab assistant (Homework 4/5)."""
+    prompts = prompts or {}
     emit = on_turn or (lambda t: None)
     coding = coding_spec(workdir)
     tools = [coding] + ([focusing_spec(bench_dir)] if bench_dir else [])
@@ -366,16 +388,29 @@ def build_graph(backend, bridge, workdir: str, allow_human: bool = True, max_dec
                                       ncalls=ft.max_calls_per_turn)
         ex_tools += ("; and the focusing tool of the Homework 2 SIMULATED bench (laser -> DMD -> scattering medium -> "
                      "camera), for focusing experiments in simulation")
-    schema = DecisionHITL if allow_human else DecisionAuto
-    orch_sys = ORCH_BASE.format(max_dec=max_decisions, executor_tools=ex_tools) + (
+    exec_sys += prompts.get("executor", "")
+    if bridge is None:
+        schema = DecisionHITLNoHW if allow_human else DecisionAutoNoHW
+        base = ORCH_BASE.replace(HW_ROLE_LINE, "")
+    else:
+        schema = DecisionHITL if allow_human else DecisionAuto
+        base = ORCH_BASE
+    if prompts.get("team"):
+        base = base.replace(ORCH_FIRST_LINE, prompts["team"])
+    orch_sys = base.format(max_dec=max_decisions, executor_tools=ex_tools) + (
         ORCH_HUMAN if allow_human else "\nThe person is not available during this run: decide on your own.")
-    command_defs = [t for t in bridge.tool_defs if t.name not in MEASURE_TOOLS + (INFO_TOOL,)]
+    if bridge is None:
+        orch_sys = orch_sys.replace(' ("hardware", "executor" or "finish")', ' ("executor" or "finish")').replace(
+            "change the camera's settings or run a long\n     acquisition (a hardware turn), run", "run")
+    scientist_sys = prompts.get("scientist", SCIENTIST_SYSTEM)
+    general_sys = prompts.get("general", GENERAL_SYSTEM)
+    command_defs = [t for t in bridge.tool_defs if t.name not in MEASURE_TOOLS + (INFO_TOOL,)] if bridge else []
     command_names = [t.name for t in command_defs]
     hw_sys = HW_SYSTEM.format(max_steps=max_hw_steps, commands="\n".join(
         f"- {t.name}: {t.description}\n  args: {json.dumps(t.inputSchema.get('properties', {}))}" for t in command_defs))
 
     def n_tool_calls():
-        return sum(len(t.log) for t in tools) + len(bridge.log)
+        return sum(len(t.log) for t in tools) + (len(bridge.log) if bridge else 0)
 
     def files_on_disk():
         out = []
@@ -468,10 +503,10 @@ def build_graph(backend, bridge, workdir: str, allow_human: bool = True, max_dec
 
     # -- scientist / general -------------------------------------------------------------
     def scientist(state):
-        return say("scientist", backend.chat("scientist", SCIENTIST_SYSTEM, specialist_prompt(state["dialogue"], "scientist")))
+        return say("scientist", backend.chat("scientist", scientist_sys, specialist_prompt(state["dialogue"], "scientist")))
 
     def general(state):
-        return say("general", backend.chat("general", GENERAL_SYSTEM, specialist_prompt(state["dialogue"], "general")))
+        return say("general", backend.chat("general", general_sys, specialist_prompt(state["dialogue"], "general")))
 
     # -- executor with its software tools (coding tool; focusing tool of the simulated bench) --------
     def executor(state):
@@ -538,7 +573,7 @@ def build_graph(backend, bridge, workdir: str, allow_human: bool = True, max_dec
             dec = HWDecision(action="measure", n_frames=dec.n_frames, label=dec.label, regions=dec.regions,
                              reason=f"'{dec.command}' is not an instrument command tool ({command_names}); measuring instead")
         what = {"command": f"{dec.command} {json.dumps(dec.command_args)}"
-                           + ("" if dec.command in SELF_MEASURING else f", then capture {dec.n_frames} frame(s)"),
+                           + ("" if dec.command in NO_CAPTURE else f", then capture {dec.n_frames} frame(s)"),
                 "measure": f"capture {dec.n_frames} frame(s) with the current settings" + (" + analyze_frame" if dec.analyze else ""),
                 "ask_person": f"ask the person: {dec.question}",
                 "finish": f"finish: {dec.summary}"}[dec.action]
@@ -609,6 +644,12 @@ def build_graph(backend, bridge, workdir: str, allow_human: bool = True, max_dec
         if series:
             ver = ver or {"tool": "camera"}
             ver["series"] = [{k: s[k] for k in ("settings", "n_frames", "duration_s", "summary")} for s in series]
+        for tool, key, name in (("read_temperature", "temperature_c", "temperature_c"),
+                                ("save_tiff", "tiff_file", "tiff_files")):
+            vals = [t["meta"]["result"][key] for t in cmds if t["meta"]["tool"] == tool and t["meta"]["result"].get("ok")]
+            if vals:
+                ver = ver or {"tool": "camera"}
+                ver[name] = vals
         return say("executor", f"Hardware turn report: {dec['summary']}\n\n[instrument record]\n" + "\n".join(lines),
                    hw="report", verified=ver)
 
@@ -632,7 +673,7 @@ def build_graph(backend, bridge, workdir: str, allow_human: bool = True, max_dec
 
     def route_command(state):
         m = state["dialogue"][-1]["meta"]
-        return "hw_measure" if m["result"].get("ok") and m["tool"] not in SELF_MEASURING else "hw_decide"
+        return "hw_measure" if m["result"].get("ok") and m["tool"] not in NO_CAPTURE else "hw_decide"
 
     g = StateGraph(DialogueState)
     for name, fn in (("orchestrator", orchestrator), ("scientist", scientist), ("general", general), ("executor", executor),
