@@ -31,7 +31,7 @@ after which no frame is captured; the VERIFIED record of a hardware turn lists t
 \texttt{check-camera} (the MVS SDK, then the plugged-in camera), \texttt{tools} (the server's tools as an MCP client sees
 them), \texttt{run}, \texttt{live}, \texttt{demo}, and \texttt{mcp-config} (the entry that adds the camera server to any
 MCP client, e.g.\ Claude Desktop). Every model call through the Claude Code CLI is now counted (calls, input and output
-tokens, the CLI's cost estimate), and \texttt{model@low} lowers the model's thinking effort (about 40\,\% fewer output
+tokens, the CLI's cost estimate), and \texttt{model@low} lowers the model's thinking effort (36\,\% fewer output
 tokens in a test). The MCP client always uses the Windows proactor event loop, so the camera server also starts inside
 other programs, such as the web app of Homeworks~4/5.
 

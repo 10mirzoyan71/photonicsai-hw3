@@ -96,7 +96,7 @@ the repository because of their size; each capture has a `.png` preview and is l
   record includes temperatures and TIFF files.
 * **`hw3.py`**: one entry point for tests, camera check, runs, live view, demo and the MCP client configuration.
 * **Token meter**: every model call through the Claude Code CLI is counted (calls, input/output tokens, the CLI's cost
-  estimate), and `model@low` lowers the model's thinking effort (about 40 % fewer output tokens in a test).
+  estimate), and `model@low` lowers the model's thinking effort (36 % fewer output tokens in a test).
 * The MCP client always uses the Windows proactor event loop, so the camera server also starts inside other apps.
 * Tests: `test_mcp_server.py` checks the new tools (8-bit levels, dark level at a new black level, TIFF pages equal to
   the frames, settings restored after a server restart); `tests/check_real_camera.py` checks them on the lab camera.
