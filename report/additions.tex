@@ -45,8 +45,9 @@ noise model and predict the focusing enhancement with it), the instrument team i
 black level to 40 before its photon-transfer measurement, switched the light off with \texttt{set\_illumination} for 50
 dark frames, and reported a conversion gain of 2.401\,e$^-$/DN (true value 2.40), a dark noise of 2.52\,DN and a full well
 of at least 9737\,e$^-$ (true 10\,000\,e$^-$, not reached up to 30\,ms). It marked its read noise of 6.04\,e$^-$ (true
-6.0\,e$^-$) as not verified because a cross-check failed; the optics team then predicted an enhancement of about 5.4 to
-6.4 at 64 segments and 1000 iterations with this camera model.
+6.0\,e$^-$) as not verified because a cross-check failed; the optics team then predicted an enhancement of 5.3 to
+5.7 against the far field (5.4 to 6.4 against the background ring) at 64 segments and 1000 iterations with this camera
+model.
 
 \textbf{On the lab camera} the new connector functions use the same SDK calls as the connector's start-up, which ran at
 the lab (\texttt{SetIntValueEx} for \texttt{BlackLevel}, \texttt{SetEnumValue} for \texttt{ADCBitDepth}), plus
