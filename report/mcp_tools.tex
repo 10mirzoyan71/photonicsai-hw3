@@ -7,6 +7,10 @@
 \texttt{set\_roi} & x: integer, y: integer, width: integer, height: integer & Set the region of interest: offset (x, y) and size in sensor pixels.\\
 \texttt{reset\_roi} & -- & Use the full sensor again.\\
 \texttt{set\_illumination} & level: number & Light source level 0..1 on the simulated camera only (0 = dark, for dark frames).\\
+\texttt{set\_black\_level} & value: integer & Set the black level: the offset added before digitisation, in the camera's own units (on the Hikrobot camera a LARGER value gives a LOWER dark level; on the simulated camera it is the dark level in DN).\\
+\texttt{set\_adc\_bit\_depth} & bits: integer & Set the bits of the analogue-to-digital converter (8 or 12).\\
+\texttt{read\_temperature} & -- & The camera's device temperature in degrees C (dark current roughly doubles every 6-8 C, so long series and dark frames should report it).\\
+\texttt{save\_tiff} & frame\_file: string & Save a captured frame stack (.npy) as a 16-bit TIFF, one page per frame, for ImageJ/Fiji or other software.\\
 \texttt{capture} & n\_frames: integer (opt.), label: string (opt.), regions: array (opt.) & Acquire n\_frames frames with the current settings and save them.\\
 \texttt{capture\_series} & n\_frames: integer, interval\_s: number, label: string (opt.), regions: array (opt.) & Stability measurement: n\_frames frames, one every interval\_s seconds, with the current settings.\\
 \texttt{analyze\_frame} & frame\_file: string, black\_level\_dn: number (opt.), region: object (opt.) & Speckle and beam measures of a saved frame (first frame of the file): speckle contrast and grain size (FWHM of the intensity autocorrelation) inside `region` (or the whole frame), and the beam centroid and D4sigma widths.\\

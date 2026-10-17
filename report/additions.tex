@@ -1,0 +1,55 @@
+%======================================================================
+\section*{(g) Added after the deadline extension}
+%======================================================================
+The lab session showed that two camera settings decide whether a noise measurement is right: with the camera's default
+8-bit ADC a Mono12 frame has only about 240 levels (steps of 16\,DN, larger than the read noise), and with the default
+black level the dark level sits at 0\,DN and half of the dark noise is clipped. The connector fixed both at start-up.
+They are now \textbf{tools the agent can use}, together with two more, so the MCP server has 13 tools (table in (b)):
+
+\begin{center}\small
+\begin{tabular}{@{}p{0.2\linewidth}p{0.26\linewidth}p{0.27\linewidth}p{0.2\linewidth}@{}}
+\toprule
+tool & what it does & lab camera (GenICam node) & simulated camera\\ \midrule
+\texttt{set\_black\_level} & offset added before digitisation; returns the applied value &
+  \texttt{BlackLevel} (integer; a larger value gives a lower dark level: 240 $\to$ 0\,DN, 180 $\to$ 62\,DN) &
+  the dark level in DN\\
+\texttt{set\_adc\_bit\_depth} & 8 or 12 bits of the ADC & \texttt{ADCBitDepth} (\texttt{Bits\_8}/\texttt{Bits\_12}),
+  changed with the acquisition stopped & rounds to 256 levels of the 12-bit scale\\
+\texttt{read\_temperature} & device temperature in $^\circ$C (dark current depends on it) & \texttt{DeviceTemperature} &
+  warms from 38 to 41\,$^\circ$C in about 10 minutes\\
+\texttt{save\_tiff} & a capture as a 16-bit multi-page TIFF for ImageJ/Fiji & on the server (Pillow) & the same\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The new settings are part of the camera interface (\texttt{camera/base.py}), so every connector offers them or refuses
+them with a reason. A restarted server restores them from \texttt{calls.jsonl} like exposure and gain, every capture
+reports them in its settings, and in the hardware turn \texttt{read\_temperature} and \texttt{save\_tiff} are commands
+after which no frame is captured; the VERIFIED record of a hardware turn lists the temperatures read and the TIFF files.
+
+\textbf{Packaging.} \texttt{hw3.py} is one entry point: \texttt{test} (all offline tests with a summary),
+\texttt{check-camera} (the MVS SDK, then the plugged-in camera), \texttt{tools} (the server's tools as an MCP client sees
+them), \texttt{run}, \texttt{live}, \texttt{demo}, and \texttt{mcp-config} (the entry that adds the camera server to any
+MCP client, e.g.\ Claude Desktop). Every model call through the Claude Code CLI is now counted (calls, input and output
+tokens, the CLI's cost estimate), and \texttt{model@low} lowers the model's thinking effort (about 40\,\% fewer output
+tokens in a test). The MCP client always uses the Windows proactor event loop, so the camera server also starts inside
+other programs, such as the web app of Homeworks~4/5.
+
+\textbf{Tests} (\texttt{python hw3.py test}, simulated camera; all three suites pass). With the 8-bit ADC every value of a
+dark frame is a multiple of $4095/255$ (16, 32, 48, 64\,DN, \dots); a black level of 100 gives a dark level of
+100.0\,DN; the TIFF has one page per frame, equal to the frames; the device temperature reads 38.07\,$^\circ$C; and a
+restarted server restores the 8-bit ADC, the black level of 100 and the gain of 6\,dB.
+
+\textbf{Used by the agent.} In a run of the lab assistant of Homeworks~4/5 on the simulated camera (request: measure the
+noise model and predict the focusing enhancement with it), the instrument team itself set the ADC to 12 bits and the
+black level to 40 before its photon-transfer measurement, switched the light off with \texttt{set\_illumination} for 50
+dark frames, and reported a conversion gain of 2.401\,e$^-$/DN (true value 2.40), a dark noise of 2.52\,DN and a full well
+of at least 9737\,e$^-$ (true 10\,000\,e$^-$, not reached up to 30\,ms). It marked its read noise of 6.04\,e$^-$ (true
+6.0\,e$^-$) as not verified because a cross-check failed; the optics team then predicted an enhancement of about 5.4 to
+6.4 at 64 segments and 1000 iterations with this camera model.
+
+\textbf{On the lab camera} the new connector functions use the same SDK calls as the connector's start-up, which ran at
+the lab (\texttt{SetIntValueEx} for \texttt{BlackLevel}, \texttt{SetEnumValue} for \texttt{ADCBitDepth}), plus
+\texttt{GetFloatValue} for \texttt{DeviceTemperature}; \texttt{tests/check\_real\_camera.py} now also checks them (black
+level up and back, 8- and 12-bit frames, temperature). This check runs at the next lab session (18 October), before the
+live demonstration of Homeworks~4/5.

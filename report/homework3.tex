@@ -177,7 +177,7 @@ the lab bench, where the light is not under software control. Both stops are Lan
   \node[b,fill=red!5] (ft) at (6.4,-4.6) {focusing tool\\\scriptsize camera model: measured};
   \node[b,fill=red!5] (bench) at (5.6,-6.7) {simulated bench (HW2)\\\scriptsize laser, DMD, medium, camera};
   \node[b,fill=orange!10] (mc) at (10.6,-4.6) {MCP client\\\scriptsize \texttt{mcp\_bridge.py}, one session};
-  \node[b,fill=orange!10] (ms) at (10.6,-6.7) {MCP server\\\scriptsize \texttt{camera\_server.py}, 9 tools};
+  \node[b,fill=orange!10] (ms) at (10.6,-6.7) {MCP server\\\scriptsize \texttt{camera\_server.py}, 13 tools};
   \node[b,fill=orange!10] (cn) at (10.6,-8.6) {connector\\\scriptsize \texttt{camera/base.py} interface};
   \node[b,fill=orange!10] (hk) at (8.4,-10.5) {Hikrobot connector\\\scriptsize MVS SDK, USB3 Vision};
   \node[b,fill=orange!10] (sm) at (12.8,-10.5) {simulated camera\\\scriptsize tests, dry runs};
@@ -285,4 +285,6 @@ Before the lab session the same system ran six requests on the simulated camera 
 true parameters are known, these runs check the method: the agent's photon-transfer measurements gave 2.30 and
 2.41\,e$^-$/DN and 5.66 and 6.04\,e$^-$ read noise (true: 2.40\,e$^-$/DN and 6.0\,e$^-$), and in the room-light scene it
 found the 100\,Hz flicker (22\,\% at 1\,ms, 0.27\,\% at 30\,ms).
+\clearpage
+\input{additions.tex}
 \end{document}
