@@ -78,7 +78,8 @@ be resumed later with `--reply "..."`. `python demo_real.py --thread my_demo` op
 * Stability: −3.4 %/min over 2 min (most likely the fading daylight from the window).
 * Noise model: conversion gain 6.14 e⁻/DN, read noise 5.8 e⁻, full well ≥ 24 800 e⁻ (ADC-limited).
 * Focusing prediction at the Homework 2 settings (256 segments): enhancement 30.6 with this camera against 33.6 with the
-  bench's default camera.
+  bench's default camera against the background ring, but 26.5 against 21.7 against the far field: with one run each the
+  difference is within the run-to-run spread, so the measured camera does not limit the focusing.
 * Human stops: the graph asked for approval and for the light to be blocked; when the light was not blocked, the agent
   noticed that the "dark" frames were bright and did not use them.
 

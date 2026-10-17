@@ -228,12 +228,16 @@ did not attribute the drift to the camera; with daylight from the window in the 
 frames and a photon-transfer series the agent measured a conversion gain of 6.14\,e$^-$/DN, a read noise of 5.78\,e$^-$ and
 a full well of at least 24\,766\,e$^-$ (limited by the 12-bit ADC, so a lower bound). With these numbers as the bench's
 camera and a signal level chosen so that the focus stays at about 66\,\% of the full well, the focusing tool predicted an
-enhancement of 10.8 for the quick configuration the agent chose (64 segments, 6000 iterations). The agent itself noted
+enhancement of 10.8 (8.4 against the far field) for the quick configuration the agent chose (64 segments, 6000
+iterations). The agent itself noted
 that this value is set by the bench configuration rather than by the camera; for binary-amplitude shaping with 64
 segments the expected enhancement is about $N/2\pi \approx 10$. A follow-up run without the camera (use case~7) therefore
 compared both cameras at the Homework~2 settings (256 segments, 40\,000 iterations, the same signal of 400\,e$^-$/px): the
-bench's default camera gave 33.55 and the measured lab camera 30.63, about 9\,\% lower (at 100\,e$^-$/px: 26.45 and 25.12),
-with no saturated pixel. One run per setting, so the run-to-run spread is not included.
+bench's default camera gave 33.55 and the measured lab camera 30.63 (at 100\,e$^-$/px: 26.45 and 25.12), with no saturated
+pixel. These values are against the background ring of 6--20\,px, which the search can darken; against the far field
+(focus over the mean speckle outside the ring, the standard definition) the same runs gave 21.7 and 26.5 (at
+100\,e$^-$/px: 21.1 and 21.4), the opposite order. With one run per setting, the difference between the two cameras is
+therefore within the run-to-run spread: at these signal levels the measured lab camera does not limit the focusing.
 \item \textbf{Human stops, first attempt:} the person approved the hardware turn. Inside it the agent asked for the light to
 be blocked for dark frames; the person replied without blocking it (having not been told what the dark frames were for).
 The agent did not trust the reply: it checked each ``dark'' set, saw that it was as bright as the wall (2054 vs.\
